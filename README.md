@@ -1,6 +1,5 @@
 # TMD-MIL
 Transportation Mode Detection Model Using Multiple Instance Learning along with Acceleration and GPS data
 
+<img src="https://github.com/favicon.ico](https://github.com/chrissiargas/TMD-MIL/blob/main/net.png" width="48">
 
-
-![alt text](https://github.com/chrissiargas/TMD-MIL/blob/main/net.png?raw=true {width=40px height=400px})
