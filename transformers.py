@@ -1,18 +1,10 @@
 import copy
-import math
 import numpy as np
 from geopy.distance import great_circle
 from scipy.interpolate import CubicSpline
 import tensorflow as tf
-import scipy
 from scipy import signal
 from scipy import interpolate
-# import tensorflow_addons as tfa
-from matplotlib import pyplot as plt
-import matplotlib
-from skimage.transform import resize
-
-
 
 
 def GenerateRandomCurves(N, sigma=0.2, knot=4, xyz=False):
@@ -652,25 +644,12 @@ class TemporalLocationTransform:
             'GPS': 4
         }
 
-        self.n_bags = shl_args.train_args['locBagSize']
+        self.n_bags = 1
 
         self.time_features = shl_args.train_args['time_features']
         self.statistical_features = shl_args.train_args['statistical_features']
         self.point_features = shl_args.train_args['point_features']
 
-        if self.time_features is None:
-            self.time_features = [
-                'Velocity',
-                'Acceleration'
-            ]
-
-        if self.statistical_features is None:
-            self.statistical_features = []
-
-        if self.point_features is None:
-            self.point_features = []
-
-        self.threshold = shl_args.train_args['padding_threshold']
         self.mask = shl_args.train_args['mask']
 
         self.mean = True if 'Mean' in self.statistical_features else False
@@ -678,6 +657,7 @@ class TemporalLocationTransform:
 
         self.length = self.shl_args.data_args['locDuration']
         self.channels = len(self.time_features)
+        self.threshold = self.length
 
         self.filter = self.shl_args.train_args['GPS_filtering']
 

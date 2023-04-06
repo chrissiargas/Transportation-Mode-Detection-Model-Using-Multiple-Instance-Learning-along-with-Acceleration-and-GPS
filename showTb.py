@@ -1,7 +1,6 @@
-
 from tensorboard import program
 user = 1
-tracking_address = r"C:\Users\chris\PycharmProjects\shlProject\logs_user" + str(user) + '/MIL_tensorboard'  # the path of your log file.
+tracking_address = r"C:\Users\chris\PycharmProjects\shlProject\logs_user" + str(user) + '/fullModelTb'  # the path of your log file.
 
 if __name__ == "__main__":
     tb = program.TensorBoard()

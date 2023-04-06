@@ -31,7 +31,6 @@ train_args:
   accBagSize: 3 # odd for Present
   accBagStride: 1800
   accDuration: 1800
-  locBagSize: 1
   sync: Past # [ Past, Present, Future ]
 
   acc_norm_augmentation: []   #['Jittering','Permutation','TimeWarp']
@@ -47,31 +46,22 @@ train_args:
   - Acc_norm
   - Jerk
 
-  positions:  #['Torso','Hips','Bag','Hand']
-
   use_spectrograms: false
   specto_window: 10  #seconds
   specto_overlap: 9.5 #seconds
-  specto_concat: Frequency  #['Depth','Frequency','Time','Seperate']
   specto_augment: [frequencyMask, timeMask]  #[timeWarp, frequencyMask, timeMask, randomMask]
   frequency_masking_param: 5
   frequency_mask_num: 2
   time_masking_param: 5
   time_mask_num: 2
-
   acc_concat: Depth # [Depth, Frequency]
   acc_shape: 2D # [1D, 2D]
   acc_channel: Time # [Frequency, Time]
-  gpsPosition:
 
   location_noise: false
   noise_std_factor: 1.0
 
   GPS_filtering: false
-
-  padding_threshold: 12
-  mask: -10000000
-  only_front_padding: false
 
   #['Acc','Lat','Long','Alt','GPS','Distance','Velocity','Acceleration','Jerk','Bearing','BearingRate','Movability']
 
@@ -83,12 +73,9 @@ train_args:
   - TotalWalk
   - Mean
   - Var
-
   #[TotalDistance, TotalVelocity, TotalWalk, Min, Max, Mean, Var, Quantile, Skewness, Kurtosis]
 
   point_features: []
-
-  GPSNet: LSTM # [LSTM, FCLSTM]
 
   valBatchSize: 32
   trainBatchSize: 32
@@ -100,11 +87,7 @@ train_args:
   val_percentage: 0.15          # used if stratify == concentrated
   randomize: false
 
-  use_gated: true
-
-  seperate_MIL: false
-
-  input_dropout: 0.3
+  separate_MIL: false
 
   learning_rate: 0.0001
 
@@ -115,11 +98,6 @@ train_args:
   transfer_learning_acc: train #[train, load, none]
   transfer_learning_loc: none   #[train, load, none]
 
-  decision_tree: false
-  motorized: false
-
-  postprocessing: true
-
   transition_threshold: 30000
   post: true
 
@@ -127,8 +105,7 @@ train_args:
   heads: 1
 
   random_position: false
-
-  dimension: 128
+  mask: -10000000
 
 
 
