@@ -1,0 +1,135 @@
+data_args:
+
+  dataset: Preview #[CompleteUser1, Preview]
+  accDuration: 1800
+  accStride: 1200
+
+  locDuration: 12   #samples
+  locStride: 1 #samples
+
+  path: /home/chris/SHL
+
+  accSamplingRate: 0.05 # Period [seconds]
+  gpsSamplingRate: 60
+  samplingThreshold: 10
+
+  interpolation: true
+  interpolateThreshold: 3
+
+  src_path: /home/chris/SHL/srcData
+
+  majority: 0.6
+
+  accBagSize: 3
+  accBagStride: 1800
+  sync: Past # [ Past, Present, Future ]
+
+train_args:
+
+  pair_threshold: 60000
+
+  accBagSize: 3 # odd for Present
+  accBagStride: 1800
+  accDuration: 1800
+  locBagSize: 1
+  sync: Past # [ Past, Present, Future ]
+
+  acc_norm_augmentation: []   #['Jittering','Permutation','TimeWarp']
+  acc_norm_aug_params: [] #[stdJittering, stdTimeWarp, nPermutations]
+
+  acc_xyz_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation','Gravity']
+  acc_xyz_aug_params:
+
+  acc_signals:
+  - Acc_x
+  - Acc_y
+  - Acc_z
+  - Acc_norm
+  - Jerk
+
+  positions:  #['Torso','Hips','Bag','Hand']
+
+  use_spectrograms: false
+  specto_window: 10  #seconds
+  specto_overlap: 9.5 #seconds
+  specto_concat: Frequency  #['Depth','Frequency','Time','Seperate']
+  specto_augment: [frequencyMask, timeMask]  #[timeWarp, frequencyMask, timeMask, randomMask]
+  frequency_masking_param: 5
+  frequency_mask_num: 2
+  time_masking_param: 5
+  time_mask_num: 2
+
+  acc_concat: Depth # [Depth, Frequency]
+  acc_shape: 2D # [1D, 2D]
+  acc_channel: Time # [Frequency, Time]
+  gpsPosition:
+
+  location_noise: false
+  noise_std_factor: 1.0
+
+  GPS_filtering: false
+
+  padding_threshold: 12
+  mask: -10000000
+  only_front_padding: false
+
+  #['Acc','Lat','Long','Alt','GPS','Distance','Velocity','Acceleration','Jerk','Bearing','BearingRate','Movability']
+
+  time_features:
+  - Velocity
+  - Acceleration
+
+  statistical_features:
+  - TotalWalk
+  - Mean
+  - Var
+
+  #[TotalDistance, TotalVelocity, TotalWalk, Min, Max, Mean, Var, Quantile, Skewness, Kurtosis]
+
+  point_features: []
+
+  GPSNet: LSTM # [LSTM, FCLSTM]
+
+  valBatchSize: 32
+  trainBatchSize: 32
+  testBatchSize: 32
+
+  test_user: 1
+  stratify: concentrated   # [concentrated, start&end]
+
+  val_percentage: 0.15          # used if stratify == concentrated
+  randomize: false
+
+  use_gated: true
+
+  seperate_MIL: false
+
+  input_dropout: 0.3
+
+  learning_rate: 0.0001
+
+  epochs: 80
+  accEpochs: 160
+  locEpochs: 200
+
+  transfer_learning_acc: train #[train, load, none]
+  transfer_learning_loc: none   #[train, load, none]
+
+  decision_tree: false
+  motorized: false
+
+  postprocessing: true
+
+  transition_threshold: 30000
+  post: true
+
+  verbose: 1
+  heads: 1
+
+  random_position: false
+
+  dimension: 128
+
+
+
+
