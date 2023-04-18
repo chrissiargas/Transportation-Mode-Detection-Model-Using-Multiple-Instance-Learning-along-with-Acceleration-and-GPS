@@ -108,7 +108,7 @@ class confusionMetric(keras.callbacks.Callback):
         self.batchSize = batchSize
         self.steps = steps
         self.accBagSize = args.train_args['accBagSize']
-        self.locBagSize = args.train_args['locBagSize']
+        self.locBagSize = 1
         self.accMIL = args.train_args['separate_MIL']
         self.n_heads = args.train_args['heads']
 
@@ -480,7 +480,7 @@ class testConfusionMetric(keras.callbacks.Callback):
         self.batchSize = batchSize
         self.steps = steps
         self.accBagSize = args.train_args['accBagSize']
-        self.locBagSize = args.train_args['locBagSize']
+        self.locBagSize = 1
         self.accMIL = args.train_args['separate_MIL']
         self.n_heads = args.train_args['heads']
 

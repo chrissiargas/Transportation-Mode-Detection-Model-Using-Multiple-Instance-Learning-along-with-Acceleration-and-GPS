@@ -123,7 +123,7 @@ class CategoricalTransform:
         for i in range(8):
             self.encoding[i, i] = 1.
 
-    def __call__(self, label, timeInfo):
+    def __call__(self, label, timeInfo = False):
         if timeInfo:
             return self.encoding[label[0] - 1], label[-3:]
         else:
@@ -452,8 +452,7 @@ class SpectogramAccTransform():
 
         return augment
 
-    def log_inter(self, spectrograms,
-                  freq, time):
+    def log_inter(self, spectrograms, freq, time):
 
         samples = spectrograms.shape[0]
         out_f, out_t = self.out_size
@@ -544,7 +543,7 @@ class SpectogramAccTransform():
                                                     nperseg=self.duration_window,
                                                     noverlap=self.duration_overlap)
 
-            spectrograms = self.log_inter(spectrograms, f, t, self.out_size)
+            spectrograms = self.log_inter(spectrograms, f, t)
 
             if is_train:
                 spectrograms = augment(spectrograms)
@@ -616,7 +615,8 @@ class SpectogramAccTransform():
 
             if self.transfer and not self.MIL:
                 outputs = outputs[0]
-                time = time[0]
+                if timeInfo:
+                    time = time[0]
 
         if timeInfo:
             return outputs, time
@@ -645,21 +645,29 @@ class TemporalLocationTransform:
         }
 
         self.n_bags = 1
-
         self.time_features = shl_args.train_args['time_features']
         self.statistical_features = shl_args.train_args['statistical_features']
         self.point_features = shl_args.train_args['point_features']
-
         self.mask = shl_args.train_args['mask']
-
         self.mean = True if 'Mean' in self.statistical_features else False
         self.var = True if 'Var' in self.statistical_features else False
-
         self.length = self.shl_args.data_args['locDuration']
         self.channels = len(self.time_features)
-        self.threshold = self.length
+        self.threshold = self.shl_args.train_args['padding_threshold']
+        if not self.threshold:
+            self.threshold = self.length
+        self.syncing = self.shl_args.train_args['sync']
 
-        self.filter = self.shl_args.train_args['GPS_filtering']
+
+        if self.syncing == 'Past':
+            self.pivot = self.length - 1
+        elif self.syncing == 'Present':
+            self.pivot = self.length // 2
+        elif self.syncing == 'Future':
+            self.pivot = 0
+        else:
+            self.pivot = self.length - 1
+
 
     def get_shape(self):
 
@@ -734,30 +742,29 @@ class TemporalLocationTransform:
                 pos_location[:, :, 0], pos_location[:, :, 1], pos_location[:, :, 2], pos_location[:, :, 3]
             )])
 
-    def get_distance(self, lat, lon, alt, moment):
+    def get_distance(self, lat, lon, moment):
 
         point1 = (lat[moment - 1], lon[moment - 1])
         point2 = (lat[moment], lon[moment])
 
         return great_circle(point1, point2).m
 
-    def get_velocity(self, lat, lon, alt, t, moment, kmh = False):
+    def get_velocity(self, lat, lon, t, moment, kmh = False):
         f = 3600. if kmh else 1000.
-        hvs_dis = self.get_distance(lat, lon, alt, moment)
+        hvs_dis = self.get_distance(lat, lon, moment)
         return f * hvs_dis / (t[moment] - t[moment - 1])  # m/s
 
-    def get_alt_velocity(self, alt, t, moment):
-        return 1000. * (alt[moment] - alt[moment - 1]) / (t[moment] - t[moment - 1])  # m/s
+    def get_acceleration(self, lat, lon, t, moment, kmh = False):
+        f = 3600. if kmh else 1000.
+        v1 = self.get_velocity(lat, lon, t, moment - 1, kmh=False)
+        v2 = self.get_velocity(lat, lon, t, moment, kmh=False)
+        return f * (v2 - v1) / (t[moment] - t[moment - 1])
 
-    def get_acceleration(self, lat, lon, alt, t, moment):
-        v1 = self.get_velocity(lat, lon, alt, t, moment - 1, kmh=False)
-        v2 = self.get_velocity(lat, lon, alt, t, moment, kmh=False)
-        return 3600. * (v2 - v1) / (t[moment] - t[moment - 1])
-
-    def get_jerk(self, lat, lon, alt, t, moment):
-        a1 = self.get_acceleration(lat, lon, alt, t, moment)
-        a2 = self.get_acceleration(lat, lon, alt, t, moment - 1)
-        return 1000. * (a2 - a1) / (t[moment] - t[moment - 1])
+    def get_jerk(self, lat, lon, t, moment, kmh = False):
+        f = 3600. if kmh else 1000.
+        a1 = self.get_acceleration(lat, lon, t, moment)
+        a2 = self.get_acceleration(lat, lon, t, moment - 1)
+        return f * (a2 - a1) / (t[moment] - t[moment - 1])
 
     def get_bearing(self, lat, lon, t, moment):
 
@@ -784,13 +791,12 @@ class TemporalLocationTransform:
 
         return distance / (displacement + 1e-10)
 
-    def distance(self, location, samples, duration):
+    def distance(self, location, duration):
         lats = location[:, :, 1]
         lons = location[:, :, 2]
-        alts = location[:, :, 3]
 
-        dis_signal = np.array([[self.get_distance(x, y, z, moment) for moment in range(1, duration)]
-                                    for x, y, z in zip(lats,lons,alts)])
+        dis_signal = np.array([[self.get_distance(x, y, moment) for moment in range(1, duration)]
+                                    for x, y in zip(lats,lons)])
 
         return dis_signal
 
@@ -799,59 +805,39 @@ class TemporalLocationTransform:
             time = location[:, :, -1]
             lats = location[:, :, 1]
             lons = location[:, :, 2]
-            alts = location[:, :, 3]
 
-            vel_signal = np.array([[self.get_velocity(x, y, z, t, moment) for moment in range(1, duration)]
-                                    for x, y, z, t in zip(lats,lons,alts,time)])
+            vel_signal = np.array([[self.get_velocity(x, y, t, moment) for moment in range(1, duration)]
+                                    for x, y, t in zip(lats,lons,time)])
 
             return vel_signal
-
         else:
-            return np.zeros((0, duration-1))
-
-    def altVelocity(self, location, samples, duration):
-        time = location[:, :, -1]
-        alts = location[:, :, 3]
-
-        vel_signal = np.array([[self.get_alt_velocity(z, t, moment) for moment in range(1, duration)]
-                                    for z,t in zip(alts,time)])
-
-
-        return vel_signal
+            return np.zeros((0, duration - 1))
 
     def acceleration(self, location, samples, duration):
         if samples:
             time = location[:, :, -1]
             lats = location[:, :, 1]
             lons = location[:, :, 2]
-            alts = location[:, :, 3]
 
-            acc_signal = np.array([[self.get_acceleration(x, y, z, t, moment) for moment in range(2, duration)]
-                                   for x, y, z, t in zip(lats,lons,alts,time)])
-
+            acc_signal = np.array([[self.get_acceleration(x, y, t, moment) for moment in range(2, duration)]
+                                   for x, y, t in zip(lats,lons,time)])
 
             return acc_signal
-
         else:
-            return np.zeros((0,duration-2))
+            return np.zeros((0, duration - 2))
 
-    def jerk(self, location, samples, duration):
-        if samples:
-            time = location[:, :, -1]
-            lats = location[:, :, 1]
-            lons = location[:, :, 2]
-            alts = location[:, :, 3]
+    def jerk(self, location, duration):
 
+        time = location[:, :, -1]
+        lats = location[:, :, 1]
+        lons = location[:, :, 2]
 
-            jerk_signal = np.array([[self.get_jerk(x, y, z, t, moment) for moment in range(3, duration)]
-                                       for x, y, z, t in zip(lats,lons,alts,time)])
+        jerk_signal = np.array([[self.get_jerk(x, y, t, moment) for moment in range(3, duration)]
+                                   for x, y, t in zip(lats,lons,time)])
 
-            return jerk_signal
+        return jerk_signal
 
-        else:
-            return np.zeros((0,duration-3))
-
-    def bearing(self, pos_location, samples, duration):
+    def bearing(self, pos_location, duration):
 
         time = pos_location[:, :, -1]
         lats = pos_location[:, :, 1]
@@ -862,46 +848,40 @@ class TemporalLocationTransform:
 
         return bear_signal
 
-    def bearing_rate(self, pos_location, samples, duration):
+    def bearing_rate(self, pos_location, duration):
 
-        if samples:
-            time = pos_location[:, :, -1]
-            lats = pos_location[:, :, 1]
-            lons = pos_location[:, :, 2]
+        time = pos_location[:, :, -1]
+        lats = pos_location[:, :, 1]
+        lons = pos_location[:, :, 2]
 
-            BR_signal = np.array([[self.get_bearing_rate(x, y, t, moment) for moment in range(2, duration)]
-                                     for x,y,t in zip(lats,lons,time)])
+        BR_signal = np.array([[self.get_bearing_rate(x, y, t, moment) for moment in range(2, duration)]
+                                 for x,y,t in zip(lats,lons,time)])
 
-
-            return BR_signal
-
-        else:
-            return np.zeros((0, duration-2))
-
-
+        return BR_signal
 
     def cropping(self, location_bag):
-
-        front = True
-        end = False
-
-        front_padding = 0
-        end_padding = 0
-
         max_front_pad = 0
         max_end_pad = 0
+        after = 0
+        before = 0
 
         for location_window in location_bag:
-            for location in location_window:
-                if location[0] != -1.:
-                    front = False
-                    end = True
 
-                elif front:
-                    front_padding += 1
+            for after in range(1, self.length - self.pivot + 1):
+                if after == self.length - self.pivot:
+                    break
+                if location_window[self.pivot + after][0] == -1:
+                    break
 
-                elif end:
-                    end_padding += 1
+            end_padding = self.length - self.pivot - after
+
+            for before in range(1, self.pivot + 2):
+                if before == self.pivot + 1:
+                    break
+                if location_window[self.pivot - before][0] == -1:
+                    break
+
+            front_padding = self.pivot - before + 1
 
             max_front_pad = max(front_padding, max_front_pad)
             max_end_pad = max(end_padding, max_end_pad)
@@ -916,123 +896,74 @@ class TemporalLocationTransform:
                max_end_pad, \
                cropped_length
 
-    def kalman_filter(self, pos_location, samples, duration):
-        time = pos_location[:, :, -1]
-        lats = pos_location[:, :, 1]
-        lons = pos_location[:, :, 2]
-        accs = pos_location[:, :, 0]
-        filtered = copy.deepcopy(pos_location)
-        self.variance = -1
-
-        for i, (lat, lon, acc, t) in enumerate(zip(
-                lats,
-                lons,
-                accs,
-                time
-        )):
-            for moment in range(0, duration):
-
-                filtered[i, moment, 1:3] = self.kalman(lat,lon,acc,t,moment)
-
-        return filtered
-
-    def kalman(self, lat, lon, acc, t, moment):
-
-        if self.variance < 0:
-
-            self.variance = acc[moment] ** 2
-            self.lat = lat
-            self.lon = lon
-
-        else:
-            delta_t = t[moment] - t[moment-1]
-            self.variance += (delta_t * self.decay ** 2) / 1000.
-            _k = self.variance / (self.variance + acc[moment] ** 2)
-            self.lat += _k * (lat - self.lat)
-            self.lon += _k * (lon - self.lon)
-            self.variance = (1 - _k) * self.variance
-
-        return [self.lat,self.lon]
-
     def __call__(self, location, is_train=True, timeInfo=False):
 
         location, front_pad, end_pad, length = self.cropping(location)
-
         samples = location.shape[0]
-
-        if self.filter:
-            print(self.distance(location, samples, length))
-            location = self.kalman_filter(location, samples, length)
-            print(self.distance(location, samples, length))
 
         if self.location_noise and is_train and np.size(location):
             location[:, :, 1:4] = self.noisy(location, length)
 
-        signal_features = None
+        statistical_features = None
+        aggregated_features = None
+        time_series = None
+        signals = None
 
         if timeInfo:
             time = location[:, :, -3:]
 
-        for signal_index, signal_name in enumerate(self.time_features):
-            if signal_name in self.loc_signals:
-                loc_signal = location[:, :, self.loc_signals[signal_name]]
-
+        for index, time_feature in enumerate(self.time_features):
+            if time_feature in self.loc_signals:
+                time_series = location[:, :, self.loc_signals[time_feature]]
             else:
-                if signal_name == 'Distance':
+                if time_feature == 'Distance':
 
-                    loc_signal = self.distance(location, samples, length)
+                    time_series = self.distance(location, length)
 
-                elif signal_name == 'Velocity':
+                elif time_feature == 'Velocity':
 
-                    loc_signal = self.velocity(location, samples, length)
+                    time_series = self.velocity(location, samples, length)
 
-                elif signal_name == 'AltVelocity':
+                elif time_feature == 'Acceleration':
 
-                    loc_signal = self.altVelocity(location, samples, length)
+                    time_series = self.acceleration(location, samples, length)
 
-                elif signal_name == 'Acceleration':
+                elif time_feature == 'Jerk':
 
-                    loc_signal = self.acceleration(location, samples, length)
+                    time_series = self.jerk(location, length)
 
-                elif signal_name == 'Jerk':
+                elif time_feature == 'Bearing':
 
-                    loc_signal = self.jerk(location, samples, length)
+                    time_series = self.bearing(location, length)
 
-                elif signal_name == 'Bearing':
+                elif time_feature == 'BearingRate':
 
-                    loc_signal = self.bearing(location, samples, length)
-
-                elif signal_name == 'BearingRate':
-
-                    loc_signal = self.bearing_rate(location, samples, length)
+                    time_series = self.bearing_rate(location, length)
 
                 if self.mean:
-                    signal_features = np.mean(loc_signal, axis=1)[:, np.newaxis] if signal_features is None \
-                        else np.concatenate([signal_features, np.mean(loc_signal, axis=1)[:, np.newaxis]], axis=1)
+                    statistical_features = np.mean(time_series, axis=1)[:, np.newaxis] if statistical_features is None \
+                        else np.concatenate([statistical_features, np.mean(time_series, axis=1)[:, np.newaxis]], axis=1)
 
                 if self.var:
-                    signal_features = np.var(loc_signal, axis=1)[:, np.newaxis] if signal_features is None \
-                        else np.concatenate([signal_features, np.var(loc_signal, axis=1)[:, np.newaxis]], axis=1)
+                    statistical_features = np.var(time_series, axis=1)[:, np.newaxis] if statistical_features is None \
+                        else np.concatenate([statistical_features, np.var(time_series, axis=1)[:, np.newaxis]], axis=1)
 
-            if np.size(loc_signal):
-                loc_signal = np.pad(loc_signal,
-                                    [(0, 0), (front_pad, end_pad)],
-                                    mode='constant',
-                                    constant_values=self.mask)
 
-            if signal_index == 0:
+            if np.size(time_series):
+                time_series = np.pad(time_series, [(0, 0), (front_pad, end_pad)],
+                                     mode='constant', constant_values=self.mask)
 
-                signals = loc_signal[:, :, np.newaxis]
+            if index == 0:
+                signals = time_series[:, :, np.newaxis]
 
             else:
-
                 signals = np.concatenate(
                     (signals[:, -self.totalLength:, :],
-                     loc_signal[:, -self.totalLength:, np.newaxis]),
+                     time_series[:, -self.totalLength:, np.newaxis]),
                     axis=2
                 )
 
-        initialized = False
+        init = False
         for feature_index, feature_name in enumerate(self.point_features):
 
             if feature_name == 'Velocity':
@@ -1041,12 +972,12 @@ class TemporalLocationTransform:
                 for i, positions in enumerate(location):
                     Velocity[i, 0] = self.get_velocity(positions[:,1], positions[:,2], positions[:,3], positions[:,-1], -1)
 
-                if not initialized:
-                    initialized = True
-                    features = Velocity
+                if not init:
+                    init = True
+                    aggregated_features = Velocity
 
                 else:
-                    features = np.concatenate([features, Velocity], axis=1)
+                    aggregated_features = np.concatenate([aggregated_features, Velocity], axis=1)
 
             if feature_name == 'Acceleration':
 
@@ -1055,12 +986,12 @@ class TemporalLocationTransform:
 
                     Acceleration[i, 0] = self.get_acceleration(positions[:,1], positions[:,2], positions[:,3], positions[:,-1], -1)
 
-                if not initialized:
-                    initialized = True
-                    features = Acceleration
+                if not init:
+                    init = True
+                    aggregated_features = Acceleration
 
                 else:
-                    features = np.concatenate([features, Acceleration], axis=1)
+                    aggregated_features = np.concatenate([aggregated_features, Acceleration], axis=1)
 
             if feature_name == 'BearingRate':
 
@@ -1069,12 +1000,12 @@ class TemporalLocationTransform:
 
                     BearingRate[i, 0] = self.get_bearing_rate(positions[:,1], positions[:,2], positions[:,-1], -1)
 
-                if not initialized:
-                    initialized = True
-                    features = BearingRate
+                if not init:
+                    init = True
+                    aggregated_features = BearingRate
 
                 else:
-                    features = np.concatenate([features, BearingRate], axis=1)
+                    aggregated_features = np.concatenate([aggregated_features, BearingRate], axis=1)
 
             if feature_name == 'Movability':
 
@@ -1083,12 +1014,12 @@ class TemporalLocationTransform:
 
                     Movability[i, 0] = self.get_movability(positions[:,1], positions[:,2], -1)
 
-                if not initialized:
-                    initialized = True
-                    features = Movability
+                if not init:
+                    init = True
+                    aggregated_features = Movability
 
                 else:
-                    features = np.concatenate([features, Movability], axis=1)
+                    aggregated_features = np.concatenate([aggregated_features, Movability], axis=1)
 
             if feature_name == 'Jerk':
 
@@ -1097,26 +1028,12 @@ class TemporalLocationTransform:
 
                     Jerk[i, 0] = self.get_jerk(positions[:,1], positions[:,2], positions[:,3], positions[:,-1], -1)
 
-                if not initialized:
-                    initialized = True
-                    features = Jerk
+                if not init:
+                    init = True
+                    aggregated_features = Jerk
 
                 else:
-                    features = np.concatenate([features, Jerk], axis=1)
-
-            if feature_name == 'Accuracy':
-
-                Accuracy = np.zeros((samples, 1))
-                for i, positions in enumerate(location):
-
-                    Accuracy[i, 0] = positions[-1,0]
-
-                if not initialized:
-                    initialized = True
-                    features = Accuracy
-
-                else:
-                    features = np.concatenate([features, Accuracy], axis=1)
+                    aggregated_features = np.concatenate([aggregated_features, Jerk], axis=1)
 
         done = False
         for feature_index, feature_name in enumerate(self.statistical_features):
@@ -1125,18 +1042,18 @@ class TemporalLocationTransform:
                     continue
 
                 else:
-                    if not initialized:
-                        initialized = True
-                        features = signal_features
+                    if not init:
+                        init = True
+                        aggregated_features = statistical_features
 
                     else:
-                        features = np.concatenate([features, signal_features], axis=1)
+                        aggregated_features = np.concatenate([aggregated_features, statistical_features], axis=1)
 
                     done = True
 
             else:
                 if feature_name == 'TotalWalk':
-                    dis_signal = self.distance(location, samples, length)
+                    dis_signal = self.distance(location, length)
 
                     TotalWalk = np.zeros((samples, 1))
                     for i, (positions, distances) in enumerate(zip(location, dis_signal)):
@@ -1148,12 +1065,12 @@ class TemporalLocationTransform:
 
                         TotalWalk[i, 0] = total_distance / (displacement + 1e-10)
 
-                    if not initialized:
-                        initialized = True
-                        features = TotalWalk
+                    if not init:
+                        init = True
+                        aggregated_features = TotalWalk
 
                     else:
-                        features = np.concatenate([features, TotalWalk], axis=1)
+                        aggregated_features = np.concatenate([aggregated_features, TotalWalk], axis=1)
 
         if self.n_bags:
             n_null = self.n_bags - samples
@@ -1164,21 +1081,23 @@ class TemporalLocationTransform:
                                          axis=0)
 
                 extra_nulls = np.zeros((n_null, self.features)) + self.mask
-                features = np.concatenate((features, extra_nulls),
+                aggregated_features = np.concatenate((aggregated_features, extra_nulls),
                                           axis=0)
 
-                extra_nulls = np.zeros((n_null, self.length, 3)) + self.mask
-                time = np.concatenate((time, extra_nulls),
-                                      axis=0)
+                if timeInfo:
+                    extra_nulls = np.zeros((n_null, self.length, 3)) + self.mask
+                    time = np.concatenate((time, extra_nulls),
+                                          axis=0)
 
         if self.transfer:
             signals = signals[0]
-            features = features[0]
-            time = time[0]
+            aggregated_features = aggregated_features[0]
+            if timeInfo:
+                time = time[0]
 
         if timeInfo:
-            return signals, features, time
+            return signals, aggregated_features, time
 
         else:
-            return signals, features
+            return signals, aggregated_features
 

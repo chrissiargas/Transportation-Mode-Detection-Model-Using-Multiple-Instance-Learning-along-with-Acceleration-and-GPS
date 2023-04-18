@@ -14,7 +14,7 @@ def getAccEncoder(input_shapes, args, L):
     kernelInitializer = keras.initializers.he_uniform()
 
     useMIL = args.train_args['separate_MIL']
-    dimension = args.train_args['dimension']
+    dimension = 128
     shape = args.train_args['acc_shape']
 
     if useMIL:

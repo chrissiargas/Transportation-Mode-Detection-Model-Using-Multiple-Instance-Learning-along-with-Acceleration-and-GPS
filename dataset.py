@@ -3,7 +3,7 @@ import random
 import pandas as pd
 from configParser import Parser
 from extractData import extractData
-from preprocessing import preprocessData
+from buildData import buildData
 from transformers import *
 
 np.set_printoptions(precision=14)
@@ -23,11 +23,6 @@ class Dataset:
 
     def __init__(self, regenerate=False, verbose=False):
 
-
-
-
-
-
         parser = Parser()
         self.shl_args = parser.get_args()
         self.verbose = verbose
@@ -37,10 +32,10 @@ class Dataset:
 
             if not xData.found:
 
-                ppData = preprocessData(args=self.shl_args, verbose=verbose)
+                bData = buildData(args=self.shl_args, verbose=verbose)
 
-                ppData()
-                del ppData
+                bData()
+                del bData
 
                 self.acceleration, self.labels, self.location = xData()
 
@@ -51,16 +46,15 @@ class Dataset:
 
         else:
 
-            ppData = preprocessData(args=self.shl_args,
-                                    verbose=verbose,
-                                    delete_dst=True,
-                                    delete_tmp=True,
-                                    delete_final=True,
-                                    delete_filter=True)
+            bData = buildData(args=self.shl_args,
+                               verbose=verbose,
+                               delete_dst=True,
+                               delete_tmp=True,
+                               delete_final=True,
+                               delete_filter=True)
 
-            ppData()
-
-            del ppData
+            bData()
+            del bData
 
             xData = extractData(self.shl_args)
 
@@ -142,7 +136,6 @@ class Dataset:
         self.val_days = []
         self.test_days = []
         self.valPercentage = self.shl_args.train_args['val_percentage']
-
 
     def to_bags(self):
 
@@ -458,7 +451,6 @@ class Dataset:
 
     def to_generator(self, is_val=False, is_test=False, accTransfer=False, gpsTransfer=False, timeInfo=False):
 
-
         if not is_test:
             if not is_val:
                 indices = self.train_indices
@@ -488,8 +480,15 @@ class Dataset:
                                                        is_train=not (is_val or is_test),
                                                        position=position, timeInfo=timeInfo)
                     else:
-                        accBag = self.accTfrm(self.acceleration[self.acc_bags[i]], is_train = not (is_val or is_test),
-                                              position = position)
+                        try:
+                            accBag = self.accTfrm(self.acceleration[self.acc_bags[i]], is_train = not (is_val or is_test),
+                                                  position = position)
+                        except:
+                            print(i)
+
+                            print(position)
+
+                            # print(self.test_indices)
 
                 if not accTransfer:
                     if timeInfo:
@@ -608,6 +607,7 @@ class Dataset:
             random.shuffle(self.train_indices)
 
     def split_train_val_test(self, seed=1):
+        self.test_indices = []
 
         if self.complete:
 
@@ -807,7 +807,6 @@ class Dataset:
             positions = len(self.positions)
 
             if not gpsTransfer:
-
                 for i, test_index in enumerate(self.test_indices):
 
                     pos = [random.sample(range(positions), positions) for _ in range(n)]
@@ -831,10 +830,10 @@ class Dataset:
                     pos = list(map(list, zip(*pos)))
 
                     if i == 0:
-                        pos_val_indices = [[val_index, pos[i]] for i in range(positions)]
+                        pos_val_indices = [[val_index, pos[j]] for j in range(positions)]
                         continue
 
-                    pos_val_indices.extend([[val_index, pos[i]] for i in range(positions)])
+                    pos_val_indices.extend([[val_index, pos[j]] for j in range(positions)])
 
                 self.val_indices = pos_val_indices
 
@@ -850,10 +849,10 @@ class Dataset:
                     pos = list(map(list, zip(*pos)))
 
                     if i == 0:
-                        pos_train_indices = [[train_index, pos[i]] for i in range(positions)]
+                        pos_train_indices = [[train_index, pos[j]] for j in range(positions)]
                         continue
 
-                    pos_train_indices.extend([[train_index, pos[i]] for i in range(positions)])
+                    pos_train_indices.extend([[train_index, pos[j]] for j in range(positions)])
 
                 self.train_indices = pos_train_indices
 
@@ -881,18 +880,8 @@ class Dataset:
 
     def get_loc_nulls(self, bags):
 
-        if self.shl_args.train_args['gpsPosition'] == None:
-            if self.complete:
-                position = 'Hips'
-
-            else:
-                position = 'Hand'
-
-        else:
-            position = self.shl_args.train_args['gpsPosition']
-
         null_loc = []
-        for i, loc_bag in enumerate(bags['loc_bags'][position]):
+        for i, loc_bag in enumerate(bags['gps'][self.whichGPS]):
             if not loc_bag:
                 null_loc.append(i)
 
@@ -960,7 +949,6 @@ class Dataset:
                                  gpsTransfer=gpsTransfer)
 
             train = self.to_generator(
-                is_val=False,
                 accTransfer=accTransfer,
                 gpsTransfer=gpsTransfer,
                 timeInfo=timeInfo

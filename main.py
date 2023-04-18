@@ -6,6 +6,7 @@ import sys
 import ruamel.yaml
 import warnings
 import os
+from evaluation import evaluate
 
 logdir = os.path.join("results","results_" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
 warnings.filterwarnings('ignore')
@@ -45,7 +46,7 @@ def config_edit(args, parameter, value):
         yaml.dump(data, fb)
 
 
-def main(logger = False, regenerate = False, all_users = False):
+def main(logger = False, regenerate = True, all_users = True, evaluation = False):
 
     if logger:
         sys.stdout = Logger()
@@ -70,11 +71,10 @@ def main(logger = False, regenerate = False, all_users = False):
                 pprint.pprint(SD.shl_args.train_args)
                 print()
 
-            TMD_MIL(SD,
-                    summary=True,
-                    verbose=SD.shl_args.train_args['verbose'],
-                    evaluation=False,
-                    load=False)
+            if evaluation:
+                evaluate(SD, verbose=SD.shl_args.train_args['verbose'])
+            else:
+                TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'])
 
     else:
 
@@ -86,11 +86,7 @@ def main(logger = False, regenerate = False, all_users = False):
             pprint.pprint(SD.shl_args.train_args)
             print()
 
-        TMD_MIL(SD,
-                summary=True,
-                verbose=SD.shl_args.train_args['verbose'],
-                evaluation=False,
-                load=False)
+        TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'])
 
 
 if __name__ == "__main__":

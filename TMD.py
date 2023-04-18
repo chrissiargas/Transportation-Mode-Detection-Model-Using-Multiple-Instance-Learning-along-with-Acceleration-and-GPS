@@ -432,14 +432,14 @@ def build(input_shapes, args, L, D, accTransferNet = None, gpsTransferNet = None
             poolings.append(Flatten(tf.matmul(attentionWs, Encodings_)))
 
     poolings =  tf.stack(poolings)
-    heads = []
+    headOutputs = []
     for i in range(n_heads):
-        heads.append(heads[i](poolings[i]))
+        headOutputs.append(heads[i](poolings[i]))
 
-    heads = tf.transpose(tf.stack(heads), perm=(1,0,2))
+    headOutputs = tf.transpose(tf.stack(headOutputs), perm=(1,0,2))
     head_pooling = keras.layers.AveragePooling1D(pool_size=(n_heads),strides=1)
     Flatten = tf.keras.layers.Flatten()
-    head = Flatten(head_pooling(heads))
+    head = Flatten(head_pooling(headOutputs))
     yPred = classifier(head)
 
     return keras.models.Model([accBag, gpsSeriesBag, gpsFeaturesBag, accPos], yPred)
@@ -694,7 +694,7 @@ def TMD_MIL(data: Dataset,
         postprocessing_model.transmat_ = trans
         postprocessing_model.emissionprob_ = conf
 
-        x, y, lengths = data.postprocess(Model=Model, fit=False)
+        x, y, lengths = data.postprocess(Model=Model)
 
         y_ = postprocessing_model.predict(x, lengths)
         score = sklearn.metrics.accuracy_score(y, y_)
@@ -737,6 +737,9 @@ def TMD_MIL(data: Dataset,
         print(score)
         print(f1_score)
 
+    del data.acceleration
+    del data.location
+    del data.labels
     del data
 
     return

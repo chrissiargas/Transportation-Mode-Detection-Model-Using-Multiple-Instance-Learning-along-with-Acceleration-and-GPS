@@ -2,7 +2,7 @@ data_args:
 
   dataset: Preview #[CompleteUser1, Preview]
   accDuration: 1800
-  accStride: 1200
+  accStride: 600
 
   locDuration: 12   #samples
   locStride: 1 #samples
@@ -21,7 +21,7 @@ data_args:
   majority: 0.6
 
   accBagSize: 3
-  accBagStride: 1800
+  accBagStride: 800
   sync: Past # [ Past, Present, Future ]
 
 train_args:
@@ -29,7 +29,7 @@ train_args:
   pair_threshold: 60000
 
   accBagSize: 3 # odd for Present
-  accBagStride: 1800
+  accBagStride: 800
   accDuration: 1800
   sync: Past # [ Past, Present, Future ]
 
@@ -46,7 +46,7 @@ train_args:
   - Acc_norm
   - Jerk
 
-  use_spectrograms: false
+  use_spectrograms: true
   specto_window: 10  #seconds
   specto_overlap: 9.5 #seconds
   specto_augment: [frequencyMask, timeMask]  #[timeWarp, frequencyMask, timeMask, randomMask]
@@ -58,10 +58,11 @@ train_args:
   acc_shape: 2D # [1D, 2D]
   acc_channel: Time # [Frequency, Time]
 
-  location_noise: false
+  location_noise: true
   noise_std_factor: 1.0
 
-  GPS_filtering: false
+  padding_threshold:
+  mask: -10000000
 
   #['Acc','Lat','Long','Alt','GPS','Distance','Velocity','Acceleration','Jerk','Bearing','BearingRate','Movability']
 
@@ -85,7 +86,7 @@ train_args:
   stratify: concentrated   # [concentrated, start&end]
 
   val_percentage: 0.15          # used if stratify == concentrated
-  randomize: false
+  randomize: true
 
   separate_MIL: false
 
@@ -104,8 +105,7 @@ train_args:
   verbose: 1
   heads: 1
 
-  random_position: false
-  mask: -10000000
+  random_position: true
 
 
 
