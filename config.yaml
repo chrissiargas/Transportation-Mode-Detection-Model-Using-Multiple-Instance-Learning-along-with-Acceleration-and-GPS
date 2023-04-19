@@ -1,8 +1,8 @@
 data_args:
 
   dataset: Preview #[CompleteUser1, Preview]
-  accDuration: 1200
-  accStride: 1200
+  accDuration: 1800
+  accStride: 600
 
   locDuration: 12   #samples
   locStride: 1 #samples
@@ -21,23 +21,19 @@ data_args:
   majority: 0.6
 
   accBagSize: 3
-  accBagStride: 1200
-  sync: Present # [ Past, Present, Future ]
+  accBagStride: 800
+  sync: Past # [ Past, Present, Future ]
 
 train_args:
 
   pair_threshold: 60000
 
   accBagSize: 3 # odd for Present
-  accBagStride: 1200
-  accDuration: 1200
-  sync: Present # [ Past, Present, Future ]
+  accBagStride: 800
+  accDuration: 1800
+  sync: Past # [ Past, Present, Future ]
 
-  acc_norm_augmentation: []   #['Jittering','Permutation','TimeWarp']
-  acc_norm_aug_params: [] #[stdJittering, stdTimeWarp, nPermutations]
-
-  acc_xyz_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation','Gravity']
-  acc_xyz_aug_params:
+  acc_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation','Gravity']
 
   acc_signals:
   - Acc_x
@@ -50,10 +46,6 @@ train_args:
   specto_window: 10  #seconds
   specto_overlap: 9.5 #seconds
   specto_augment: [frequencyMask, timeMask]  #[timeWarp, frequencyMask, timeMask, randomMask]
-  frequency_masking_param: 5
-  frequency_mask_num: 2
-  time_masking_param: 5
-  time_mask_num: 2
   acc_concat: Depth # [Depth, Frequency]
   acc_shape: 2D # [1D, 2D]
   acc_channel: Time # [Frequency, Time]
@@ -71,7 +63,7 @@ train_args:
   - Acceleration
 
   statistical_features:
-  - TotalWalk
+  - TotalMovability
   - Mean
   - Var
   #[TotalDistance, TotalVelocity, TotalWalk, Min, Max, Mean, Var, Quantile, Skewness, Kurtosis]
@@ -82,7 +74,7 @@ train_args:
   trainBatchSize: 32
   testBatchSize: 32
 
-  test_user: 1
+  test_user: 3
   stratify: concentrated   # [concentrated, start&end]
 
   val_percentage: 0.15          # used if stratify == concentrated

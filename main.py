@@ -46,23 +46,37 @@ def config_edit(args, parameter, value):
         yaml.dump(data, fb)
 
 
-def main(logger = False, regenerate = False, all_users = True, evaluation = False):
+def main(logger = False, regenerate = False, all_users = False, evaluation = False):
+    repeat = 4
 
     if logger:
         sys.stdout = Logger()
 
     if all_users:
-        for i, test_user in enumerate([1,2,3]):
+        for j in range(repeat):
+            for i, test_user in enumerate([1,2,3]):
 
-            print('USER: ' + str(test_user))
+                print('USER: ' + str(test_user))
 
-            config_edit('train_args', 'test_user', test_user)
-            if i == 0 and regenerate:
-                regenerate = True
+                config_edit('train_args', 'test_user', test_user)
 
-            else:
-                regenerate = False
+                regenerate = regenerate if i == j == 0 else False
+                SD = Dataset(regenerate=regenerate)
 
+                if logger:
+                    pprint.pprint(SD.shl_args.data_args)
+                    print()
+                    pprint.pprint(SD.shl_args.train_args)
+                    print()
+
+                if evaluation:
+                    evaluate(SD, verbose=SD.shl_args.train_args['verbose'])
+                else:
+                    TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'])
+
+    else:
+        for j in range(repeat):
+            regenerate = regenerate if j == 0 else False
             SD = Dataset(regenerate=regenerate)
 
             if logger:
@@ -75,20 +89,6 @@ def main(logger = False, regenerate = False, all_users = True, evaluation = Fals
                 evaluate(SD, verbose=SD.shl_args.train_args['verbose'])
             else:
                 TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'])
-
-    else:
-        SD = Dataset(regenerate=regenerate)
-
-        if logger:
-            pprint.pprint(SD.shl_args.data_args)
-            print()
-            pprint.pprint(SD.shl_args.train_args)
-            print()
-
-        if evaluation:
-            evaluate(SD, verbose=SD.shl_args.train_args['verbose'])
-        else:
-            TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'])
 
 
 if __name__ == "__main__":

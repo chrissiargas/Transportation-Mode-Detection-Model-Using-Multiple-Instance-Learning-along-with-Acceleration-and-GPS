@@ -258,14 +258,14 @@ class Dataset:
         if not gpsTransfer:
 
             if self.useSpectro:
-                self.accTfrm = SpectogramAccTransform(
+                self.accTfrm = spectrogramTransformer(
                     self.shl_args,
                     accTransfer=accTransfer,
                     accMIL=self.accMIL
                 )
 
             else:
-                self.accTfrm = TemporalAccTransform(
+                self.accTfrm = temporalTransformer(
                     self.shl_args,
                     accTransfer = accTransfer,
                     accMIL = self.accMIL
@@ -276,13 +276,13 @@ class Dataset:
                 self.accTimeShape = self.accTfrm.get_time_shape()
 
         if not accTransfer:
-            self.gpsTfrm = TemporalLocationTransform(shl_args=self.shl_args,
-                                                     locTransfer=gpsTransfer)
-            self.gpsSeriesShape, self.gpsFeaturesShape = self.gpsTfrm.get_shape()
+            self.gpsTfrm = gpsTransformer(shl_args=self.shl_args,
+                                          locTransfer=gpsTransfer)
+            self.gpsSeriesShape, self.gpsFeaturesShape = self.gpsTfrm.get_shape
             if timeInfo:
                 self.gpsTimeShape = self.gpsTfrm.get_time_shape()
 
-        self.lbsTfrm = CategoricalTransform()
+        self.lbsTfrm = CategoricalTransformer()
 
         if gpsTransfer:
             self.inputShape = (self.gpsSeriesShape, self.gpsFeaturesShape)

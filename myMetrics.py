@@ -2,7 +2,7 @@ import io
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import tensorflow.keras as keras
+import keras
 from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -91,6 +91,7 @@ class testMetrics(keras.callbacks.Callback):
             print(" - test_f1: %f - test_precision: %f - test_recall %f" %(test_f1,test_precision,test_recall))
 
         return
+
 
 class valTables(keras.callbacks.Callback):
     def __init__(self,
@@ -836,9 +837,9 @@ class testTables(keras.callbacks.Callback):
         return
 
 
-class valMetricsGPS(keras.callbacks.Callback):
+class gpsValMetrics(keras.callbacks.Callback):
     def __init__(self, val, batchSize, steps, verbose = 1):
-        super(valMetricsGPS, self).__init__()
+        super(gpsValMetrics, self).__init__()
         self.val = val
         self.batchSize = batchSize
         self.steps = steps
@@ -875,9 +876,9 @@ class valMetricsGPS(keras.callbacks.Callback):
         return
 
 
-class testMetricsGPS(keras.callbacks.Callback):
+class gpsTestMetrics(keras.callbacks.Callback):
     def __init__(self, test, batchSize, steps, verbose = 1):
-        super(testMetricsGPS, self).__init__()
+        super(gpsTestMetrics, self).__init__()
         self.test = test
         self.batchSize = batchSize
         self.steps = steps
@@ -913,10 +914,10 @@ class testMetricsGPS(keras.callbacks.Callback):
         return
 
 
-class confusionMetricGPS(keras.callbacks.Callback):
+class gpsValTables(keras.callbacks.Callback):
     def __init__(self, val, batchSize, steps, file_writer):
 
-        super(confusionMetricGPS, self).__init__()
+        super(gpsValTables, self).__init__()
         self.val = val
         self.batchSize = batchSize
         self.steps = steps
@@ -981,14 +982,14 @@ class confusionMetricGPS(keras.callbacks.Callback):
         return
 
 
-class testConfusionMetricGPS(keras.callbacks.Callback):
+class gpsTestTables(keras.callbacks.Callback):
     def __init__(self,
                  test,
                  batchSize,
                  steps,
                  file_writer):
 
-        super(testConfusionMetricGPS, self).__init__()
+        super(gpsTestTables, self).__init__()
         self.test = test
         self.batchSize = batchSize
         self.steps = steps
@@ -1052,9 +1053,9 @@ class testConfusionMetricGPS(keras.callbacks.Callback):
         return
 
 
-class valMetricsAcc(keras.callbacks.Callback):
+class accValMetrics(keras.callbacks.Callback):
     def __init__(self, val, batchSize, steps, verbose = 1):
-        super(valMetricsAcc, self).__init__()
+        super(accValMetrics, self).__init__()
         self.val = val
         self.batchSize = batchSize
         self.steps = steps
@@ -1090,9 +1091,9 @@ class valMetricsAcc(keras.callbacks.Callback):
         return
 
 
-class testMetricsAcc(keras.callbacks.Callback):
+class accTestMetrics(keras.callbacks.Callback):
     def __init__(self, test, batchSize, steps, verbose = 1):
-        super(testMetricsAcc, self).__init__()
+        super(accTestMetrics, self).__init__()
         self.test = test
         self.batchSize = batchSize
         self.steps = steps
@@ -1128,7 +1129,7 @@ class testMetricsAcc(keras.callbacks.Callback):
         return
 
 
-class confusionMetricAcc(keras.callbacks.Callback):
+class accValTables(keras.callbacks.Callback):
     def __init__(self,
                  args,
                  val,
@@ -1137,7 +1138,7 @@ class confusionMetricAcc(keras.callbacks.Callback):
                  file_writer,
                  weights_file_writer):
 
-        super(confusionMetricAcc, self).__init__()
+        super(accValTables, self).__init__()
         self.positional = None
         self.weighting = None
         self.val = val
@@ -1285,7 +1286,7 @@ class confusionMetricAcc(keras.callbacks.Callback):
         return
 
 
-class testConfusionMetricAcc(keras.callbacks.Callback):
+class accTestTables(keras.callbacks.Callback):
     def __init__(self,
                  args,
                  test,
@@ -1294,7 +1295,7 @@ class testConfusionMetricAcc(keras.callbacks.Callback):
                  file_writer,
                  weights_file_writer):
 
-        super(testConfusionMetricAcc, self).__init__()
+        super(accTestTables, self).__init__()
         self.test = test
         self.batchSize = batchSize
         self.steps = steps
