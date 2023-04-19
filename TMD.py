@@ -11,8 +11,9 @@ from tensorflow.keras.layers import LSTM, Bidirectional, TimeDistributed, Dropou
 import accEncoder
 import gpsEncoder
 from dataset import Dataset
-from hmm_params import hmmParams
-from metrics import valMetrics, confusionMetric, testMetrics, testConfusionMetric
+from hmmParams import hmmParams
+from myMetrics import valMetrics, valTables, testMetrics, testTables
+from sklearn.metrics import accuracy_score, f1_score
 
 
 class MaskRelu(keras.layers.Layer):
@@ -212,8 +213,8 @@ def getGpsEncoder(input_shapes, args, L):
     bnLayer = keras.layers.BatchNormalization(name='locBatch', trainable=False)
     X = bnLayer(X)
 
-    lstmLayer = tf.keras.layers.LSTM(units=128,
-                                     name='locLSTM')
+    lstmLayer = Bidirectional(tf.keras.layers.LSTM(units=128,
+                                     name='locLSTM'))
     X = lstmLayer(X)
 
     X = tf.concat([X, gpsFeatures], axis=1)
@@ -585,26 +586,21 @@ def TMD_MIL(data: Dataset,
 
     loss_function = keras.losses.CategoricalCrossentropy()
 
-    Model = build(data.inputShape,
-                     data.shl_args,
-                     L, D, accNetwork,
-                     gpsNetwork)
+    Model = build(data.inputShape, data.shl_args, L, D, accNetwork, gpsNetwork)
 
-    Model.compile(
-        optimizer=optimizer,
-        loss=loss_function,
-        metrics=[keras.metrics.categorical_accuracy]
-    )
+    Model.compile(optimizer=optimizer,
+                  loss=loss_function,
+                  metrics=[keras.metrics.categorical_accuracy])
 
     val_metrics = valMetrics(val, data.valBatchSize, val_steps, verbose = verbose)
 
-    val_cm = confusionMetric(data.shl_args,
-                              val,
-                              data.valBatchSize,
-                              val_steps,
-                              file_writer_val,
-                              w_file_writer_val,
-                              w_pos_file_writer_val)
+    val_tables = valTables(data.shl_args,
+                           val,
+                           data.valBatchSize,
+                           val_steps,
+                           file_writer_val,
+                           w_file_writer_val,
+                           w_pos_file_writer_val)
 
     save_model = keras.callbacks.ModelCheckpoint(
         filepath=filepath,
@@ -612,130 +608,87 @@ def TMD_MIL(data: Dataset,
         verbose=verbose,
         save_best_only=True,
         mode='min',
-        save_weights_only=True
-    )
+        save_weights_only=True)
 
     early_stopping = keras.callbacks.EarlyStopping(
         monitor='val_loss',
         min_delta=0,
         patience=30,
         mode='min',
-        verbose=verbose
-    )
+        verbose=verbose)
 
     reduce_lr_plateau = keras.callbacks.ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.4,
         patience=10,
         verbose=verbose,
-        mode='min'
-    )
+        mode='min')
 
     if summary and verbose:
         print(Model.summary())
 
-
     callbacks = [tensorboard_callback,
                  save_model,
                  early_stopping,
-                 reduce_lr_plateau]
+                 reduce_lr_plateau,
+                 val_metrics,
+                 val_tables]
 
-    Model.fit(
-        train,
-        epochs=data.epochs,
-        steps_per_epoch=train_steps,
-        validation_data=val,
-        validation_steps=val_steps,
-        callbacks=callbacks,
-        use_multiprocessing=True,
-        verbose=verbose
-    )
+    Model.fit(train,
+              epochs=data.epochs,
+              steps_per_epoch=train_steps,
+              validation_data=val,
+              validation_steps=val_steps,
+              callbacks=callbacks,
+              use_multiprocessing=True,
+              verbose=verbose)
 
     Model.load_weights(filepath)
 
     test_metrics = testMetrics(test, data.testBatchSize, test_steps)
 
-    test_cm = testConfusionMetric(data.shl_args,
-                                  test,
-                                  data.testBatchSize,
-                                  test_steps,
-                                  file_writer_test,
-                                  w_file_writer_test,
-                                  w_pos_file_writer_test)
+    test_tables = testTables(data.shl_args,
+                             test,
+                             data.testBatchSize,
+                             test_steps,
+                             file_writer_test,
+                             w_file_writer_test,
+                             w_pos_file_writer_test)
 
-    callbacks = [test_metrics]
+    callbacks = [test_metrics, test_tables]
 
     Model.evaluate(test, steps=test_steps, callbacks=callbacks)
 
     if data.postprocessing:
         params = hmmParams()
+        confusion, transition = params(data.complete, data.testUser)
 
-        if data.testUser == 1:
-            conf = params.conf1
-            trans = params.trans1
+        startprob = [1. / 8. for _ in range(8)]
 
-        elif data.testUser == 2:
-            conf = params.conf2
-            trans = params.trans2
+        HMM = hmm.MultinomialHMM(n_components=8,
+                                algorithm='viterbi',
+                                random_state=93,
+                                n_iter=100)
 
-        elif data.testUser == 3:
-            conf = params.conf3
-            trans = params.trans3
-
-        startprob = [1. / 8 for _ in range(8)]
-
-        postprocessing_model = hmm.MultinomialHMM(n_components=8,
-                                                  algorithm='viterbi',
-                                                  random_state=93,
-                                                  n_iter=100
-                                                  )
-
-        postprocessing_model.startprob_ = startprob
-        postprocessing_model.transmat_ = trans
-        postprocessing_model.emissionprob_ = conf
+        HMM.startprob_ = startprob
+        HMM.transmat_ = transition
+        HMM.emissionprob_ = confusion
 
         x, y, lengths = data.postprocess(Model=Model)
 
-        y_ = postprocessing_model.predict(x, lengths)
-        score = sklearn.metrics.accuracy_score(y, y_)
-        f1_score = sklearn.metrics.f1_score(y, y_, average='macro')
+        y_ = HMM.predict(x, lengths)
+        accuracy = accuracy_score(y, y_)
+        f1 = f1_score(y, y_, average='macro')
 
         print()
-        print(score)
-        print(f1_score)
-        print()
+        print('Accuracy with post-processing: {}'.format(accuracy))
+        print('F1-Score with post-processing: {}'.format(f1))
 
-        score = sklearn.metrics.accuracy_score(y, x)
-        f1_score = sklearn.metrics.f1_score(y, x, average='macro')
+        accuracy = accuracy_score(y, x)
+        f1 = f1_score(y, x, average='macro')
 
-        print(score)
-        print(f1_score)
-        print()
-
-        postprocessing_model = hmm.MultinomialHMM(n_components=8,
-                                                  algorithm='viterbi',
-                                                  random_state=93,
-                                                  n_iter=100
-                                                  )
-
-        postprocessing_model.startprob_ = startprob
-        postprocessing_model.transmat_ = params.totalTrans
-        postprocessing_model.emissionprob_ = params.totalConf
-
-        y_ = postprocessing_model.predict(x, lengths)
-        score = sklearn.metrics.accuracy_score(y, y_)
-        f1_score = sklearn.metrics.f1_score(y, y_, average='macro')
-
-        print()
-        print(score)
-        print(f1_score)
-        print()
-
-        score = sklearn.metrics.accuracy_score(y, x)
-        f1_score = sklearn.metrics.f1_score(y, x, average='macro')
-
-        print(score)
-        print(f1_score)
+        print('Accuracy without post-processing: {}'.format(accuracy))
+        print('F1-Score without post-processing: {}'.format(f1))
 
     del data.acceleration
     del data.location

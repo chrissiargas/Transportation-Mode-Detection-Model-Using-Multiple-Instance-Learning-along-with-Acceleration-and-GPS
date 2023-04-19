@@ -7,8 +7,8 @@ import accEncoder
 import gpsEncoder
 from dataset import Dataset
 from TMD import build, testMetrics
-from metrics import testMetrics, testConfusionMetric
-from hmm_params import hmmParams
+from myMetrics import testMetrics, testTables
+from hmmParams import hmmParams
 
 
 def evaluate(data: Dataset, verbose = 0):
@@ -121,13 +121,13 @@ def evaluate(data: Dataset, verbose = 0):
     w_file_writer_test = tf.summary.create_file_writer(logdir + '/wm_test')
     w_pos_file_writer_test = tf.summary.create_file_writer(logdir + '/wm_pos_test')
 
-    test_cm = testConfusionMetric(data.shl_args,
-                                  test,
-                                  data.testBatchSize,
-                                  test_steps,
-                                  file_writer_test,
-                                  w_file_writer_test,
-                                  w_pos_file_writer_test)
+    test_cm = testTables(data.shl_args,
+                         test,
+                         data.testBatchSize,
+                         test_steps,
+                         file_writer_test,
+                         w_file_writer_test,
+                         w_pos_file_writer_test)
 
     callbacks = [test_metrics, test_cm]
 

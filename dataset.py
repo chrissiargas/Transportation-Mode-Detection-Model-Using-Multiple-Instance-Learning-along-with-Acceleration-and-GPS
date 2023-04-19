@@ -670,8 +670,8 @@ class Dataset:
         true_sequence = []
         lengths = []
         length = 0
-        n_pos = len(self.positions)
-        inputs = [[[] for _ in range(4)] for _ in range(len(self.positions))]
+        positions = len(self.positions)
+        inputs = [[[] for _ in range(4)] for _ in range(positions)]
 
         for index, (label, day, time, user) in enumerate(zip(self.labels[:-1, 0],
                                                              self.labels[:-1, -2],
@@ -681,11 +681,11 @@ class Dataset:
             if (self.complete and day in self.test_days) or (user == self.testUser and not self.complete):
 
                 if self.random_position:
-                    pos = [random.sample(range(n_pos), n_pos) for _ in range(self.accBagSize)]
+                    pos = [random.sample(range(positions), positions) for _ in range(self.accBagSize)]
                     pos = list(map(list, zip(*pos)))
 
                 else:
-                    pos = [[p for _ in range(self.accBagSize)] for p in range(n_pos)]
+                    pos = [[p for _ in range(self.accBagSize)] for p in range(positions)]
 
                 for pos_j, position in enumerate(pos):
 
@@ -710,13 +710,13 @@ class Dataset:
                 if self.labels[index + 1][-1] - time > self.syncThreshold \
                         or self.labels[index + 1][-2] != day or self.labels[index + 1][-3] != user:
 
-                    for pos_j in range(n_pos):
+                    for pos_j in range(positions):
                         true.extend(true_sequence)
                         predicted.extend(
                             np.argmax(Model.predict([np.array(inputs[pos_j][i]) for i in range(4)], verbose=0), axis=1))
                         lengths.append(length)
 
-                    inputs = [[[] for _ in range(4)] for _ in range(n_pos)]
+                    inputs = [[[] for _ in range(4)] for _ in range(positions)]
                     true_sequence = []
                     length = 0
 

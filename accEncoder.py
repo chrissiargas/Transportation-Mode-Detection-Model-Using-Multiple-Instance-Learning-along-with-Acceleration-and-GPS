@@ -6,7 +6,7 @@ import os
 from tensorflow.keras.layers import Bidirectional
 from dataset import Dataset
 import tensorflow.keras.backend as K
-from metrics import valMetricsAcc, testMetricsAcc, confusionMetricAcc, testConfusionMetricAcc
+from myMetrics import valMetricsAcc, testMetricsAcc, confusionMetricAcc, testConfusionMetricAcc
 
 
 def getAccEncoder(input_shapes, args, L):

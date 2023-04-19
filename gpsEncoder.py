@@ -4,7 +4,7 @@ import tensorflow.keras as keras
 import os
 from dataset import Dataset
 import tensorflow.keras.backend as K
-from metrics import valMetricsGPS, testMetricsGPS, confusionMetricGPS, testConfusionMetricGPS
+from myMetrics import valMetricsGPS, testMetricsGPS, confusionMetricGPS, testConfusionMetricGPS
 
 
 class MaskRelu(keras.layers.Layer):

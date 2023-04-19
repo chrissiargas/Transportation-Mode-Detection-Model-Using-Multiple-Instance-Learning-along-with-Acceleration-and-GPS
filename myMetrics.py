@@ -29,7 +29,7 @@ class valMetrics(keras.callbacks.Callback):
         self.score = 'macro'
         self.verbose = verbose
 
-    def on_epoch_end(self, logs={}):
+    def on_epoch_end(self, epoch, logs={}):
         total = self.batchSize * self.steps
         step = 0
         val_predict = np.zeros((total))
@@ -76,8 +76,7 @@ class testMetrics(keras.callbacks.Callback):
             test_data = batch[0]
             test_target = batch[1]
 
-
-            test_predict[step*self.batchSize : (step+1)*self.batchSize] = np.argmax(np.asarray(self.model.predict(test_data, verbose=0)),axis=1)
+            test_predict[step*self.batchSize : (step+1)*self.batchSize] = np.argmax(np.asarray(self.model.predict(test_data, verbose=0)), axis=1)
             test_true[step * self.batchSize : (step + 1) * self.batchSize] = np.argmax(test_target,axis=1)
             step += 1
 
@@ -93,7 +92,7 @@ class testMetrics(keras.callbacks.Callback):
 
         return
 
-class confusionMetric(keras.callbacks.Callback):
+class valTables(keras.callbacks.Callback):
     def __init__(self,
                  args,
                  val,
@@ -102,7 +101,7 @@ class confusionMetric(keras.callbacks.Callback):
                  file_writer,
                  weights_file_writer,
                  weights_pos_file_writer):
-        super(confusionMetric, self).__init__()
+        super(valTables, self).__init__()
 
         self.val = val
         self.batchSize = batchSize
@@ -465,7 +464,7 @@ class confusionMetric(keras.callbacks.Callback):
         return
 
 
-class testConfusionMetric(keras.callbacks.Callback):
+class testTables(keras.callbacks.Callback):
     def __init__(self,
                  args,
                  test,
@@ -475,7 +474,7 @@ class testConfusionMetric(keras.callbacks.Callback):
                  weights_file_writer,
                  weights_pos_file_writer):
 
-        super(testConfusionMetric, self).__init__()
+        super(testTables, self).__init__()
         self.test = test
         self.batchSize = batchSize
         self.steps = steps

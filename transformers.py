@@ -766,7 +766,7 @@ class TemporalLocationTransform:
         a2 = self.get_acceleration(lat, lon, t, moment - 1)
         return f * (a2 - a1) / (t[moment] - t[moment - 1])
 
-    def get_bearing(self, lat, lon, t, moment):
+    def get_bearing(self, lat, lon, moment):
 
         y = np.sin(lon[moment] - lon[moment - 1]) * np.cos(lat[moment])
         x = np.cos(lat[moment - 1]) * np.sin(lat[moment]) - \
@@ -774,31 +774,21 @@ class TemporalLocationTransform:
 
         angle = (np.degrees(np.arctan2(y, x)) + 360) % 360
 
-        return 1000. * angle / (t[moment] - t[moment - 1])
+        return angle
 
     def get_bearing_rate(self, lat, lon, t, moment):
-        angle1 = self.get_bearing(lat, lon, t, moment - 1)
-        angle2 = self.get_bearing(lat, lon, t, moment)
-        return 1000. * (angle2 - angle1) / (t[moment] - t[moment - 1])
-
-    def get_movability(self, lat, lon, moment):
-        point1 = (lat[moment - 2], lon[moment - 2])
-        point2 = (lat[moment - 1], lon[moment - 1])
-        point3 = (lat[moment], lon[moment])
-
-        distance =  great_circle(point1, point3).m
-        displacement = great_circle(point1, point2).m + great_circle(point2, point3).m
-
-        return distance / (displacement + 1e-10)
+        angle1 = self.get_bearing(lat, lon, moment - 1)
+        angle2 = self.get_bearing(lat, lon, moment)
+        return 1000. * abs(angle2 - angle1) / (t[moment] - t[moment - 1])
 
     def distance(self, location, duration):
         lats = location[:, :, 1]
         lons = location[:, :, 2]
 
-        dis_signal = np.array([[self.get_distance(x, y, moment) for moment in range(1, duration)]
-                                    for x, y in zip(lats,lons)])
+        sequence = np.array([[self.get_distance(x, y, moment) for moment in range(1, duration)]
+                             for x, y in zip(lats,lons)])
 
-        return dis_signal
+        return sequence
 
     def velocity(self, location, samples, duration):
         if samples:
@@ -806,10 +796,10 @@ class TemporalLocationTransform:
             lats = location[:, :, 1]
             lons = location[:, :, 2]
 
-            vel_signal = np.array([[self.get_velocity(x, y, t, moment) for moment in range(1, duration)]
-                                    for x, y, t in zip(lats,lons,time)])
+            sequence = np.array([[self.get_velocity(x, y, t, moment) for moment in range(1, duration)]
+                                 for x, y, t in zip(lats,lons,time)])
 
-            return vel_signal
+            return sequence
         else:
             return np.zeros((0, duration - 1))
 
@@ -819,45 +809,52 @@ class TemporalLocationTransform:
             lats = location[:, :, 1]
             lons = location[:, :, 2]
 
-            acc_signal = np.array([[self.get_acceleration(x, y, t, moment) for moment in range(2, duration)]
-                                   for x, y, t in zip(lats,lons,time)])
+            sequence = np.array([[self.get_acceleration(x, y, t, moment) for moment in range(2, duration)]
+                                 for x, y, t in zip(lats,lons,time)])
 
-            return acc_signal
+            return sequence
         else:
             return np.zeros((0, duration - 2))
 
-    def jerk(self, location, duration):
+    def jerk(self, location, samples, duration):
+        if samples:
+            time = location[:, :, -1]
+            lats = location[:, :, 1]
+            lons = location[:, :, 2]
 
-        time = location[:, :, -1]
-        lats = location[:, :, 1]
-        lons = location[:, :, 2]
+            sequence = np.array([[self.get_jerk(x, y, t, moment) for moment in range(3, duration)]
+                                 for x, y, t in zip(lats,lons,time)])
 
-        jerk_signal = np.array([[self.get_jerk(x, y, t, moment) for moment in range(3, duration)]
-                                   for x, y, t in zip(lats,lons,time)])
+            return sequence
+        else:
+            return np.zeros((0, duration - 3))
 
-        return jerk_signal
+    def bearing(self, location, samples, duration):
+        if samples:
+            lats = location[:, :, 1]
+            lons = location[:, :, 2]
 
-    def bearing(self, pos_location, duration):
+            sequence = np.array([[self.get_bearing(x, y, moment) for moment in range(1, duration)]
+                                    for x, y in zip(lats, lons)])
 
-        time = pos_location[:, :, -1]
-        lats = pos_location[:, :, 1]
-        lons = pos_location[:, :, 2]
+            return sequence
+        else:
+            return np.zeros((0, duration - 1))
 
-        bear_signal = np.array([[self.get_bearing(x, y, t, moment) for moment in range(1, duration)]
-                                for x,y,t in zip(lats,lons,time)])
+    def bearing_rate(self, location, samples, duration):
+        if samples:
+            time = location[:, :, -1]
+            lats = location[:, :, 1]
+            lons = location[:, :, 2]
 
-        return bear_signal
+            sequence = np.array([[self.get_bearing_rate(x, y, t, moment) for moment in range(2, duration)]
+                                 for x, y, t in zip(lats, lons, time)])
 
-    def bearing_rate(self, pos_location, duration):
+            return sequence
 
-        time = pos_location[:, :, -1]
-        lats = pos_location[:, :, 1]
-        lons = pos_location[:, :, 2]
+        else:
+            return np.zeros((0, duration - 2))
 
-        BR_signal = np.array([[self.get_bearing_rate(x, y, t, moment) for moment in range(2, duration)]
-                                 for x,y,t in zip(lats,lons,time)])
-
-        return BR_signal
 
     def cropping(self, location_bag):
         max_front_pad = 0
@@ -930,15 +927,15 @@ class TemporalLocationTransform:
 
                 elif time_feature == 'Jerk':
 
-                    time_series = self.jerk(location, length)
+                    time_series = self.jerk(location, samples, length)
 
                 elif time_feature == 'Bearing':
 
-                    time_series = self.bearing(location, length)
+                    time_series = self.bearing(location, samples, length)
 
                 elif time_feature == 'BearingRate':
 
-                    time_series = self.bearing_rate(location, length)
+                    time_series = self.bearing_rate(location, samples, length)
 
                 if self.mean:
                     statistical_features = np.mean(time_series, axis=1)[:, np.newaxis] if statistical_features is None \

@@ -1,8 +1,8 @@
 data_args:
 
   dataset: Preview #[CompleteUser1, Preview]
-  accDuration: 1800
-  accStride: 600
+  accDuration: 1200
+  accStride: 1200
 
   locDuration: 12   #samples
   locStride: 1 #samples
@@ -21,17 +21,17 @@ data_args:
   majority: 0.6
 
   accBagSize: 3
-  accBagStride: 800
-  sync: Past # [ Past, Present, Future ]
+  accBagStride: 1200
+  sync: Present # [ Past, Present, Future ]
 
 train_args:
 
   pair_threshold: 60000
 
   accBagSize: 3 # odd for Present
-  accBagStride: 800
-  accDuration: 1800
-  sync: Past # [ Past, Present, Future ]
+  accBagStride: 1200
+  accDuration: 1200
+  sync: Present # [ Past, Present, Future ]
 
   acc_norm_augmentation: []   #['Jittering','Permutation','TimeWarp']
   acc_norm_aug_params: [] #[stdJittering, stdTimeWarp, nPermutations]
