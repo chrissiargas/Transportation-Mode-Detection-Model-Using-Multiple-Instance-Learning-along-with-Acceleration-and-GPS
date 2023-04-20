@@ -207,7 +207,7 @@ def getGpsEncoder(input_shapes, args, L):
     bnLayer = BatchNormalization(name='locBatch', trainable=False)
     X = bnLayer(X)
 
-    lstmLayer = tf.keras.layers.LSTM(units=128, name='locLSTM')
+    lstmLayer = Bidirectional(tf.keras.layers.LSTM(units=128, name='locLSTM'))
     X = lstmLayer(X)
 
     X = tf.concat([X, gpsFeatures], axis=1)
@@ -576,8 +576,8 @@ def TMD_MIL(data: Dataset,
     TMDMiller = build(data.inputShape, data.shl_args, L, D, accNetwork, gpsNetwork)
 
     TMDMiller.compile(optimizer=optimizer,
-                     loss=loss_function,
-                     metrics=[categorical_accuracy])
+                      loss=loss_function,
+                      metrics=[categorical_accuracy])
 
     val_metrics = valMetrics(val, data.valBatchSize, val_steps, verbose=verbose)
 
@@ -621,13 +621,13 @@ def TMD_MIL(data: Dataset,
                  val_tables]
 
     TMDMiller.fit(train,
-                 epochs=data.epochs,
-                 steps_per_epoch=train_steps,
-                 validation_data=val,
-                 validation_steps=val_steps,
-                 callbacks=callbacks,
-                 use_multiprocessing=True,
-                 verbose=verbose)
+                  epochs=data.epochs,
+                  steps_per_epoch=train_steps,
+                  validation_data=val,
+                  validation_steps=val_steps,
+                  callbacks=callbacks,
+                  use_multiprocessing=True,
+                  verbose=verbose)
 
     TMDMiller.load_weights(filepath)
 
@@ -652,9 +652,9 @@ def TMD_MIL(data: Dataset,
         startprob = [1. / 8. for _ in range(8)]
 
         HMM = MultinomialHMM(n_components=8,
-                                 algorithm='viterbi',
-                                 random_state=93,
-                                 n_iter=100)
+                             algorithm='viterbi',
+                             random_state=93,
+                             n_iter=100)
 
         HMM.startprob_ = startprob
         HMM.transmat_ = transition

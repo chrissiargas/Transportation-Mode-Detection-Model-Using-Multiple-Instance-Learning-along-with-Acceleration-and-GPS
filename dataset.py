@@ -673,10 +673,10 @@ class Dataset:
         positions = len(self.positions)
         inputs = [[[] for _ in range(4)] for _ in range(positions)]
 
-        for index, (label, day, time, user) in enumerate(zip(self.labels[:-1, 0],
-                                                             self.labels[:-1, -2],
-                                                             self.labels[:-1, -1],
-                                                             self.labels[:-1, -3])):
+        for index, (label, day, time, user) in enumerate(zip(self.labels[:,  0],
+                                                             self.labels[:, -2],
+                                                             self.labels[:, -1],
+                                                             self.labels[:, -3])):
 
             if (self.complete and day in self.test_days) or (user == self.testUser and not self.complete):
 
@@ -707,13 +707,13 @@ class Dataset:
                     inputs[pos_j][2].append(gpsFeatures)
                     inputs[pos_j][3].append(position)
 
-                if self.labels[index + 1][-1] - time > self.syncThreshold \
+                if index == self.bags - 1 or self.labels[index + 1][-1] - time > self.syncThreshold \
                         or self.labels[index + 1][-2] != day or self.labels[index + 1][-3] != user:
 
                     for pos_j in range(positions):
                         true.extend(true_sequence)
                         predicted.extend(
-                            np.argmax(Model.predict([np.array(inputs[pos_j][i]) for i in range(4)], verbose=0), axis=1))
+                            np.argmax(Model.predict([np.array(inputs[pos_j][i]) for i in range(4)], verbose = 0), axis=1))
                         lengths.append(length)
 
                     inputs = [[[] for _ in range(4)] for _ in range(positions)]

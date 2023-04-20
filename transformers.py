@@ -395,7 +395,7 @@ class gpsTransformer:
     def __init__(self, shl_args=None, locTransfer=False):
 
         self.earthR = 6372.
-        self.augmentation = shl_args.train_args['location_noise']
+        self.augmentation = shl_args.train_args['gps_augmentation']
         self.complete = (shl_args.data_args['dataset'] == 'CompleteUser1')
         self.transfer = locTransfer
         self.bagSize = 1

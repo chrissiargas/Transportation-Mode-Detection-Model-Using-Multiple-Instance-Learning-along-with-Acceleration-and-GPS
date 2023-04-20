@@ -1,8 +1,8 @@
 data_args:
 
   dataset: Preview #[CompleteUser1, Preview]
-  accDuration: 1800
-  accStride: 600
+  accDuration: 1200
+  accStride: 1200
 
   locDuration: 12   #samples
   locStride: 1 #samples
@@ -21,19 +21,19 @@ data_args:
   majority: 0.6
 
   accBagSize: 3
-  accBagStride: 800
-  sync: Past # [ Past, Present, Future ]
+  accBagStride: 1200
+  sync: Present # [ Past, Present, Future ]
 
 train_args:
 
   pair_threshold: 60000
 
   accBagSize: 3 # odd for Present
-  accBagStride: 800
-  accDuration: 1800
-  sync: Past # [ Past, Present, Future ]
+  accBagStride: 1200
+  accDuration: 1200
+  sync: Present # [ Past, Present, Future ]
 
-  acc_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation','Gravity']
+  acc_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation']
 
   acc_signals:
   - Acc_x
@@ -50,23 +50,19 @@ train_args:
   acc_shape: 2D # [1D, 2D]
   acc_channel: Time # [Frequency, Time]
 
-  location_noise: true
-  noise_std_factor: 1.0
+  gps_augmentation: true
 
   padding_threshold:
   mask: -10000000
 
-  #['Acc','Lat','Long','Alt','GPS','Distance','Velocity','Acceleration','Jerk','Bearing','BearingRate','Movability']
-
-  time_features:
+  time_features:   #['Distance','Velocity','Acceleration','Jerk','Bearing','BearingRate']
   - Velocity
   - Acceleration
 
-  statistical_features:
+  statistical_features: #[TotalMovability, Mean, Var]
   - TotalMovability
   - Mean
   - Var
-  #[TotalDistance, TotalVelocity, TotalWalk, Min, Max, Mean, Var, Quantile, Skewness, Kurtosis]
 
   point_features: []
 
@@ -75,7 +71,6 @@ train_args:
   testBatchSize: 32
 
   test_user: 3
-  stratify: concentrated   # [concentrated, start&end]
 
   val_percentage: 0.15          # used if stratify == concentrated
   randomize: true

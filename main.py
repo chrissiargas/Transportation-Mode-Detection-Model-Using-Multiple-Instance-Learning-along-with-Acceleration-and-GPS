@@ -46,8 +46,8 @@ def config_edit(args, parameter, value):
         yaml.dump(data, fb)
 
 
-def main(logger = False, regenerate = False, all_users = False, evaluation = False):
-    repeat = 4
+def main(logger = False, regenerate = False, all_users = True, evaluation = False):
+    repeat = 3
 
     if logger:
         sys.stdout = Logger()

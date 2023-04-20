@@ -1,18 +1,19 @@
-import sklearn.metrics
 import tensorflow as tf
-import tensorflow.keras as keras
 import os
-from hmmlearn import hmm
 import accEncoder
 import gpsEncoder
 from dataset import Dataset
-from TMD import build, testMetrics
+import TMD
 from myMetrics import testMetrics, testTables
 from hmmParams import hmmParams
+from keras.optimizers import Adam
+from keras.losses import CategoricalCrossentropy
+from keras.metrics import categorical_accuracy
+from hmmlearn.hmm import MultinomialHMM
+from sklearn.metrics import f1_score, accuracy_score
 
 
-def evaluate(data: Dataset, verbose = 0):
-
+def evaluate(data: Dataset, verbose=0):
     L = 256
     D = 128
 
@@ -30,16 +31,14 @@ def evaluate(data: Dataset, verbose = 0):
 
         gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args, L)
 
-        optimizer = keras.optimizers.Adam(
-            learning_rate=data.lr
-        )
+        optimizer = Adam(learning_rate=data.lr)
 
-        loss_function = keras.losses.CategoricalCrossentropy()
+        loss_function = CategoricalCrossentropy()
 
         gpsNetwork.compile(
             optimizer=optimizer,
             loss=loss_function,
-            metrics=[keras.metrics.categorical_accuracy]
+            metrics=[categorical_accuracy]
         )
 
         gpsNetwork.load_weights(filepath)
@@ -64,16 +63,14 @@ def evaluate(data: Dataset, verbose = 0):
                                       data.shl_args,
                                       L, D)
 
-        optimizer = keras.optimizers.Adam(
-            learning_rate=data.lr
-        )
+        optimizer = Adam(learning_rate=data.lr)
 
-        loss_function = keras.losses.CategoricalCrossentropy()
+        loss_function = CategoricalCrossentropy()
 
         accNetwork.compile(
             optimizer=optimizer,
             loss=loss_function,
-            metrics=[keras.metrics.categorical_accuracy]
+            metrics=[categorical_accuracy]
         )
 
         accNetwork.load_weights(filepath)
@@ -94,21 +91,16 @@ def evaluate(data: Dataset, verbose = 0):
 
     test_steps = data.testSize // data.testBatchSize
 
-    Model = build(data.inputShape,
-                    data.shl_args,
-                    L, D,
-                    accNetwork, gpsNetwork)
+    Model = TMD.build(data.inputShape, data.shl_args, L, D, accNetwork, gpsNetwork)
 
-    optimizer = keras.optimizers.Adam(
-        learning_rate=data.lr
-    )
+    optimizer = Adam(learning_rate=data.lr)
 
-    loss_function = keras.losses.CategoricalCrossentropy()
+    loss_function = CategoricalCrossentropy()
 
     Model.compile(
         optimizer=optimizer,
         loss=loss_function,
-        metrics=[keras.metrics.categorical_accuracy]
+        metrics=[categorical_accuracy]
     )
 
     Model.load_weights(filepath)
@@ -135,74 +127,39 @@ def evaluate(data: Dataset, verbose = 0):
 
     if data.postprocessing:
         params = hmmParams()
-
-        if data.testUser == 1:
-            conf = params.conf1
-            trans = params.trans1
-
-        elif data.testUser == 2:
-            conf = params.conf2
-            trans = params.trans2
-
-        elif data.testUser == 3:
-            conf = params.conf3
-            trans = params.trans3
+        conf, trans = params(data.complete, data.testUser)
 
         startprob = [1. / 8 for _ in range(8)]
 
-        postprocessing_model = hmm.MultinomialHMM(n_components=8,
-                                                  algorithm='viterbi',
-                                                  random_state=93,
-                                                  n_iter=100
-                                                  )
+        HMM = MultinomialHMM(n_components=8,
+                             algorithm='viterbi',
+                             random_state=93,
+                             n_iter=100
+                             )
 
-        postprocessing_model.startprob_ = startprob
-        postprocessing_model.transmat_ = trans
-        postprocessing_model.emissionprob_ = conf
+        HMM.startprob_ = startprob
+        HMM.transmat_ = trans
+        HMM.emissionprob_ = conf
 
         x, y, lengths = data.postprocess(Model=Model)
 
-        y_ = postprocessing_model.predict(x, lengths)
-        score = sklearn.metrics.accuracy_score(y, y_)
-        f1_score = sklearn.metrics.f1_score(y, y_, average='macro')
+        y_ = HMM.predict(x, lengths)
+        accuracy = accuracy_score(y, y_)
+        f1 = f1_score(y, y_, average='macro')
 
         print()
-        print(score)
-        print(f1_score)
-        print()
+        print('Accuracy with post-processing: {}'.format(accuracy))
+        print('F1-Score with post-processing: {}'.format(f1))
 
-        score = sklearn.metrics.accuracy_score(y, x)
-        f1_score = sklearn.metrics.f1_score(y, x, average='macro')
+        accuracy = accuracy_score(y, x)
+        f1 = f1_score(y, x, average='macro')
 
-        print(score)
-        print(f1_score)
-        print()
+        print('Accuracy without post-processing: {}'.format(accuracy))
+        print('F1-Score without post-processing: {}'.format(f1))
 
-        postprocessing_model = hmm.MultinomialHMM(n_components=8,
-                                                  algorithm='viterbi',
-                                                  random_state=93,
-                                                  n_iter=100
-                                                  )
-
-        postprocessing_model.startprob_ = startprob
-        postprocessing_model.transmat_ = params.totalTrans
-        postprocessing_model.emissionprob_ = params.totalConf
-
-        y_ = postprocessing_model.predict(x, lengths)
-        score = sklearn.metrics.accuracy_score(y, y_)
-        f1_score = sklearn.metrics.f1_score(y, y_, average='macro')
-
-        print()
-        print(score)
-        print(f1_score)
-        print()
-
-        score = sklearn.metrics.accuracy_score(y, x)
-        f1_score = sklearn.metrics.f1_score(y, x, average='macro')
-
-        print(score)
-        print(f1_score)
-
+    del data.acceleration
+    del data.location
+    del data.labels
     del data
 
     return

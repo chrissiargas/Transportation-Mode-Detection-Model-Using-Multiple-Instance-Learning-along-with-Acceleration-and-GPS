@@ -6,6 +6,7 @@ import keras
 from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
 import matplotlib.pyplot as plt
 import seaborn as sns
+from keras.callbacks import Callback
 
 
 def plot_to_image(figure):
@@ -20,7 +21,7 @@ def plot_to_image(figure):
     return image
 
 
-class valMetrics(keras.callbacks.Callback):
+class valMetrics(Callback):
     def __init__(self, val, batchSize, steps, verbose = 1):
         super(valMetrics, self).__init__()
         self.val = val
@@ -29,11 +30,11 @@ class valMetrics(keras.callbacks.Callback):
         self.score = 'macro'
         self.verbose = verbose
 
-    def on_epoch_end(self, epoch, logs={}):
+    def on_epoch_end(self, epoch, logs=None):
         total = self.batchSize * self.steps
         step = 0
-        val_predict = np.zeros((total))
-        val_true = np.zeros((total))
+        val_predict = np.zeros(total)
+        val_true = np.zeros(total)
 
         for batch in self.val.take(self.steps):
 
@@ -46,17 +47,18 @@ class valMetrics(keras.callbacks.Callback):
 
         f1 = f1_score(val_true, val_predict, average=self.score)
         recall = recall_score(val_true, val_predict, average=self.score)
-        precision =precision_score(val_true, val_predict, average=self.score)
+        precision = precision_score(val_true, val_predict, average=self.score)
 
         del val_predict
         del val_true
 
         if self.verbose:
-            print(" - val_f1: %f - val_precision: %f - val_recall: %f" %(f1,precision,recall))
+            print(" - val f1: %f - val precision: %f - val recall: %f" %(f1,precision,recall))
 
         return
 
-class testMetrics(keras.callbacks.Callback):
+
+class testMetrics(Callback):
     def __init__(self, test, batchSize, steps, verbose = 1):
         super(testMetrics, self).__init__()
         self.test = test
@@ -68,8 +70,8 @@ class testMetrics(keras.callbacks.Callback):
     def on_test_end(self, logs=None):
         total = self.batchSize * self.steps
         step = 0
-        test_predict = np.zeros((total))
-        test_true = np.zeros((total))
+        test_predict = np.zeros(total)
+        test_true = np.zeros(total)
 
         for batch in self.test.take(self.steps):
 
@@ -88,12 +90,12 @@ class testMetrics(keras.callbacks.Callback):
         del test_true
 
         if self.verbose:
-            print(" - test_f1: %f - test_precision: %f - test_recall %f" %(test_f1,test_precision,test_recall))
+            print(" - test f1: %f - test precision: %f - test recall %f" %(test_f1,test_precision,test_recall))
 
         return
 
 
-class valTables(keras.callbacks.Callback):
+class valTables(Callback):
     def __init__(self,
                  args,
                  val,
@@ -108,7 +110,7 @@ class valTables(keras.callbacks.Callback):
         self.batchSize = batchSize
         self.steps = steps
         self.accBagSize = args.train_args['accBagSize']
-        self.locBagSize = 1
+        self.gpsBagSize = 1
         self.accMIL = args.train_args['separate_MIL']
         self.n_heads = args.train_args['heads']
 
@@ -134,15 +136,20 @@ class valTables(keras.callbacks.Callback):
         else:
             self.pnl = ['Torso','Hips','Bag','Hand']
 
-    def on_train_end(self, logs={}):
+    def on_train_end(self, logs=None):
         total = self.batchSize * self.steps
         step = 0
-        val_predict = np.zeros((total))
-        val_true = np.zeros((total))
+        val_predict = np.zeros(total)
+        val_true = np.zeros(total)
 
         weights = []
         weighting = []
         acc_weights = []
+        acc_weighting = None
+        positional = None
+        positions = None
+        wm_pos_count = None
+        wm_pos_sum = None
 
         if self.accMIL:
             for head in range(self.n_heads):
@@ -174,7 +181,7 @@ class valTables(keras.callbacks.Callback):
                     outputs=self.model.get_layer("weight_layer_" + str(head)).output
                 ))
 
-                weights.append(np.zeros((total, self.locBagSize + self.accBagSize)))
+                weights.append(np.zeros((total, self.gpsBagSize + self.accBagSize)))
 
             if self.random_position:
 
@@ -214,21 +221,17 @@ class valTables(keras.callbacks.Callback):
 
         val_f1 = f1_score(val_true, val_predict, average="macro")
         val_recall = recall_score(val_true, val_predict, average="macro")
-        val_precision =precision_score(val_true, val_predict, average="macro")
+        val_precision = precision_score(val_true, val_predict, average="macro")
 
-        print(" - val_f1: %f - val_precision: %f - val_recall: %f" %(val_f1,val_precision,val_recall))
-
+        print(" - val f1: %f - val precision: %f - val recall: %f" %(val_f1,val_precision,val_recall))
 
         cm = confusion_matrix(val_true,val_predict)
         global CM
         CM = cm / cm.sum(axis=1)[:, np.newaxis]
-
         cm_df = pd.DataFrame(cm,
                              index = self.class_names,
                              columns = self.class_names)
         cm_df = cm_df.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
-
 
         figure = plt.figure(figsize=(10,10))
         sns.heatmap(cm_df, annot = True)
@@ -239,7 +242,6 @@ class valTables(keras.callbacks.Callback):
 
         with self.file_writer.as_default():
             tf.summary.image('Confusion Matrix', cm_image, step=1)
-
 
         fig, axs = plt.subplots(ncols=self.n_heads, figsize=(12, 16))
         fig.subplots_adjust(wspace=0.01)
@@ -261,7 +263,7 @@ class valTables(keras.callbacks.Callback):
                     columns=['class', *instances, 'GPS' ]
                 )
 
-                wm_pred_df['Accelerotometer'] = wm_pred_df.loc[:, instances].sum(axis=1)
+                wm_pred_df['Accelerometer'] = wm_pred_df.loc[:, instances].sum(axis=1)
                 wm_pred_df.drop(instances, inplace=True, axis=1)
 
             wm = wm_pred_df.groupby(['class'], as_index=False).mean()
@@ -299,9 +301,6 @@ class valTables(keras.callbacks.Callback):
 
         with self.weights_file_writer.as_default():
             tf.summary.image('Weight Matrix', wm_image, step=1)
-
-
-
 
         if self.random_position:
 
@@ -350,12 +349,10 @@ class valTables(keras.callbacks.Callback):
                                 wm_pos = wm_pos_sum.div(wm_pos_count.values)
                                 wm_pos = wm_pos.div(wm_pos.sum(axis=1), axis=0)
 
-
                                 sns.heatmap(wm_pos, ax=axs, cbar=False, annot=True)
                                 fig.colorbar(axs.collections[0], ax=axs, location="right", use_gridspec=False, pad=0.2)
                                 axs.set_yticklabels(labels=self.class_names, rotation=45)
                                 axs.set_xticklabels(labels=self.pnl)
-
 
                     else:
 
@@ -408,8 +405,6 @@ class valTables(keras.callbacks.Callback):
                                     fig.colorbar(axs[head].collections[0], ax=axs[head], location="right", use_gridspec=False,
                                                  pad=0.2)
 
-
-
             else:
                 fig, axs = plt.subplots(ncols=1, figsize=(12, 16))
                 fig.suptitle('Weight Matrix')
@@ -426,9 +421,6 @@ class valTables(keras.callbacks.Callback):
                         wm_pos_sum = pd.pivot_table(wm_pos_sum, values="weight", index=["class"], columns=["position"],
                                                     fill_value=0)
 
-
-
-
                         wm_pos_count = wm_pred_df.groupby(['class', 'position']).size().to_frame(name='size').reset_index()
                         wm_pos_count = pd.pivot_table(wm_pos_count, values="size", index=["class"], columns=["position"],
                                                         fill_value=0)
@@ -443,7 +435,6 @@ class valTables(keras.callbacks.Callback):
                                                       columns=["position"],
                                                       fill_value=0).values)
 
-
                     if i == self.accBagSize-1:
                         wm_pos = wm_pos_sum.div(wm_pos_count.values)
                         wm_pos = wm_pos.div(wm_pos.sum(axis=1), axis=0)
@@ -453,19 +444,15 @@ class valTables(keras.callbacks.Callback):
                         axs.set_yticklabels(labels=self.class_names, rotation=45)
                         axs.set_xticklabels(labels=self.pnl)
 
-
-
             wm_image = plot_to_image(fig)
 
             with self.weights_pos_file_writer.as_default():
                 tf.summary.image('Position-Weight Matrix', wm_image, step=1)
 
-
-
         return
 
 
-class testTables(keras.callbacks.Callback):
+class testTables(Callback):
     def __init__(self,
                  args,
                  test,
@@ -506,15 +493,20 @@ class testTables(keras.callbacks.Callback):
         else:
             self.pnl = ['Torso','Hips','Bag','Hand']
 
-    def on_test_end(self, logs={}):
+    def on_test_end(self, logs=None):
         total = self.batchSize * self.steps
         step = 0
-        test_predict = np.zeros((total))
-        test_true = np.zeros((total))
+        test_predict = np.zeros(total)
+        test_true = np.zeros(total)
 
         weights = []
         weighting = []
         acc_weights = []
+        acc_weighting = None
+        positional = None
+        positions = None
+        wm_pos_sum = None
+        wm_pos_count = None
 
         if self.accMIL:
             for head in range(self.n_heads):
@@ -560,7 +552,6 @@ class testTables(keras.callbacks.Callback):
                 for head in range(self.n_heads):
                     acc_weights.append(np.zeros((total, self.accBagSize)))
 
-
         for batch in self.test.take(self.steps):
             test_data = batch[0]
             test_target = batch[1]
@@ -589,16 +580,13 @@ class testTables(keras.callbacks.Callback):
         test_recall = recall_score(test_true, test_predict, average="macro")
         test_precision = precision_score(test_true, test_predict, average="macro")
 
-
-        print(" - test_f1: %f - test_precision: %f - test_recall %f" %(test_f1,test_precision,test_recall))
+        print(" - test f1: %f - test precision: %f - test recall %f" % (test_f1,test_precision,test_recall))
 
         cm = confusion_matrix(test_true, test_predict)
         cm_df = pd.DataFrame(cm,
                              index=self.class_names,
                              columns=self.class_names)
         cm_df = cm_df.astype('float') / cm.sum(axis=1)[:,np.newaxis]
-
-
 
         figure = plt.figure(figsize=(10, 10))
         sns.heatmap(cm_df, annot=True)
@@ -609,7 +597,6 @@ class testTables(keras.callbacks.Callback):
 
         with self.file_writer.as_default():
             tf.summary.image('Confusion Matrix', cm_image, step=1)
-
 
         fig, axs = plt.subplots(ncols=self.n_heads, figsize=(12, 16))
         fig.subplots_adjust(wspace=0.01)
@@ -628,12 +615,11 @@ class testTables(keras.callbacks.Callback):
             else:
                 wm_pred_df = pd.DataFrame(
                     wm_pred,
-                    columns=['class', *instances, 'GPS' ]
+                    columns=['class', *instances, 'GPS']
                 )
 
                 wm_pred_df['Accelerometer'] = wm_pred_df.loc[:, instances].sum(axis=1)
                 wm_pred_df.drop(instances, inplace=True, axis=1)
-
 
             wm = wm_pred_df.groupby(['class'], as_index=False).mean()
             del wm['class']
@@ -673,8 +659,6 @@ class testTables(keras.callbacks.Callback):
 
         with self.weights_file_writer.as_default():
             tf.summary.image('Weight Matrix', wm_image, step=1)
-
-
 
         if self.random_position:
 
@@ -728,7 +712,6 @@ class testTables(keras.callbacks.Callback):
                                 axs.set_yticklabels(labels=self.class_names, rotation=45)
                                 axs.set_xticklabels(labels=self.pnl)
 
-
                     else:
 
                         for i in range(self.accBagSize):
@@ -770,7 +753,6 @@ class testTables(keras.callbacks.Callback):
 
                                 sns.heatmap(wm_pos, ax=axs[head], cbar=False, annot=True)
 
-
                                 axs[head].set_xticklabels(labels=self.pnl)
 
                                 if head == 0:
@@ -779,8 +761,6 @@ class testTables(keras.callbacks.Callback):
                                 if head == self.n_heads - 1:
                                     fig.colorbar(axs[head].collections[0], ax=axs[head], location="right", use_gridspec=False,
                                                  pad=0.2)
-
-
 
             else:
                 fig, axs = plt.subplots(ncols=1, figsize=(12, 16))
@@ -798,9 +778,6 @@ class testTables(keras.callbacks.Callback):
                         wm_pos_sum = pd.pivot_table(wm_pos_sum, values="weight", index=["class"], columns=["position"],
                                                     fill_value=0)
 
-
-
-
                         wm_pos_count = wm_pred_df.groupby(['class', 'position']).size().to_frame(name='size').reset_index()
                         wm_pos_count = pd.pivot_table(wm_pos_count, values="size", index=["class"], columns=["position"],
                                                         fill_value=0)
@@ -815,7 +792,6 @@ class testTables(keras.callbacks.Callback):
                                                       columns=["position"],
                                                       fill_value=0).values)
 
-
                     if i == self.accBagSize-1:
                         wm_pos = wm_pos_sum.div(wm_pos_count.values)
                         wm_pos = wm_pos.div(wm_pos.sum(axis=1), axis=0)
@@ -824,8 +800,6 @@ class testTables(keras.callbacks.Callback):
                         fig.colorbar(axs.collections[0], ax=axs, location="right", use_gridspec=False, pad=0.2)
                         axs.set_yticklabels(labels=self.class_names, rotation=45)
                         axs.set_xticklabels(labels=self.pnl)
-
-
 
             wm_image = plot_to_image(fig)
 
