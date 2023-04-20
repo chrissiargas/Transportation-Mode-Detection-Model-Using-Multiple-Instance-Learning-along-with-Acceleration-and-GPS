@@ -281,7 +281,8 @@ def build(input_shapes, args, L=32, D=12):
 def fit(data: Dataset,
         L=256, D=128,
         summary=True,
-        verbose=0):
+        verbose=0,
+        mVerbose=False):
 
     train, val, test = data(accTransfer=True)
 
@@ -362,11 +363,18 @@ def fit(data: Dataset,
     if summary and verbose:
         print(accNetwork.summary())
 
-    callbacks = [tensorboard_callback,
-                 save_model,
-                 early_stopping,
-                 reduce_lr_plateau,
-                 val_tables]
+    if mVerbose:
+        callbacks = [tensorboard_callback,
+                     save_model,
+                     early_stopping,
+                     reduce_lr_plateau,
+                     val_metrics,
+                     val_tables]
+    else:
+        callbacks = [tensorboard_callback,
+                     save_model,
+                     early_stopping,
+                     reduce_lr_plateau]
 
     accNetwork.fit(
         train,
@@ -388,7 +396,12 @@ def fit(data: Dataset,
                             file_writer_test,
                             w_file_writer_test)
 
+    if mVerbose:
+        callbacks = [test_metrics, test_tables]
+    else:
+        callbacks = [test_metrics]
+
     accNetwork.load_weights(filepath)
-    accNetwork.evaluate(test, steps=test_steps, callbacks=[test_metrics, test_tables])
+    accNetwork.evaluate(test, steps=test_steps, callbacks=callbacks)
 
     return filepath

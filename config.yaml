@@ -70,7 +70,7 @@ train_args:
   trainBatchSize: 32
   testBatchSize: 32
 
-  test_user: 3
+  test_user: 1
 
   val_percentage: 0.15          # used if stratify == concentrated
   randomize: true
@@ -87,7 +87,7 @@ train_args:
   transfer_learning_loc: none   #[train, load, none]
 
   transition_threshold: 30000
-  post: true
+  post: false
 
   verbose: 1
   heads: 1

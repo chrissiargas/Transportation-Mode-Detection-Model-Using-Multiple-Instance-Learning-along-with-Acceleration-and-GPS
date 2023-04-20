@@ -207,7 +207,7 @@ def getGpsEncoder(input_shapes, args, L):
     bnLayer = BatchNormalization(name='locBatch', trainable=False)
     X = bnLayer(X)
 
-    lstmLayer = Bidirectional(tf.keras.layers.LSTM(units=128, name='locLSTM'))
+    lstmLayer = tf.keras.layers.LSTM(units=128, name='locLSTM')
     X = lstmLayer(X)
 
     X = tf.concat([X, gpsFeatures], axis=1)
@@ -438,7 +438,8 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
 
 def TMD_MIL(data: Dataset,
             summary=False,
-            verbose=0):
+            verbose=0,
+            mVerbose=False):
     L = 256
     D = 128
 
@@ -475,7 +476,8 @@ def TMD_MIL(data: Dataset,
         filepath = gpsEncoder.fit(
             L=L,
             summary=summary,
-            verbose=verbose
+            verbose=verbose,
+            mVerbose=mVerbose
         )
 
         data(gpsTransfer=True)
@@ -500,9 +502,7 @@ def TMD_MIL(data: Dataset,
         model_name = 'TMD_%s_model.h5' % model_type
         filepath = os.path.join(save_dir, model_name)
 
-        accNetwork = accEncoder.build(data.inputShape,
-                                      data.shl_args,
-                                      L, D)
+        accNetwork = accEncoder.build(data.inputShape, data.shl_args, L, D)
 
         optimizer = Adam(
             learning_rate=data.lr
@@ -524,7 +524,8 @@ def TMD_MIL(data: Dataset,
             data=data,
             L=L, D=D,
             summary=summary,
-            verbose=verbose
+            verbose=verbose,
+            mVerbose=mVerbose
         )
 
         data(accTransfer=True)
@@ -614,11 +615,18 @@ def TMD_MIL(data: Dataset,
     if summary and verbose:
         print(TMDMiller.summary())
 
-    callbacks = [tensorboard_callback,
-                 save_model,
-                 early_stopping,
-                 reduce_lr_plateau,
-                 val_tables]
+    if mVerbose:
+        callbacks = [tensorboard_callback,
+                     save_model,
+                     early_stopping,
+                     reduce_lr_plateau,
+                     val_metrics,
+                     val_tables]
+    else:
+        callbacks = [tensorboard_callback,
+                     save_model,
+                     early_stopping,
+                     reduce_lr_plateau]
 
     TMDMiller.fit(train,
                   epochs=data.epochs,
@@ -641,7 +649,10 @@ def TMD_MIL(data: Dataset,
                              w_file_writer_test,
                              w_pos_file_writer_test)
 
-    callbacks = [test_metrics, test_tables]
+    if mVerbose:
+        callbacks = [test_metrics, test_tables]
+    else:
+        callbacks = [test_metrics]
 
     TMDMiller.evaluate(test, steps=test_steps, callbacks=callbacks)
 

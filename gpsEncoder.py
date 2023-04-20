@@ -121,7 +121,7 @@ def build(input_shapes, args, L=256):
     return Model([gpsSeries, gpsFeatures], yPred)
 
 
-def fit(L=256, summary=True, verbose=0):
+def fit(L=256, summary=True, verbose=0, mVerbose=False):
 
     data = Dataset()
 

@@ -392,12 +392,12 @@ class spectrogramTransformer():
 
 
 class gpsTransformer:
-    def __init__(self, shl_args=None, locTransfer=False):
+    def __init__(self, shl_args=None, gpsTransfer=False):
 
         self.earthR = 6372.
         self.augmentation = shl_args.train_args['gps_augmentation']
         self.complete = (shl_args.data_args['dataset'] == 'CompleteUser1')
-        self.transfer = locTransfer
+        self.transfer = gpsTransfer
         self.bagSize = 1
         self.timeFeatures = shl_args.train_args['time_features']
         self.statFeatures = shl_args.train_args['statistical_features']
@@ -445,10 +445,10 @@ class gpsTransformer:
             self.totalLength = self.length
 
         if self.transfer:
-            sequenceShape = (self.totalLength, self.channels)
+            windowShape = (self.totalLength, self.channels)
 
         else:
-            sequenceShape = (self.bagSize, self.totalLength, self.channels)
+            windowShape = (self.bagSize, self.totalLength, self.channels)
 
         nStat = 0
         nPoint = 0
@@ -469,7 +469,7 @@ class gpsTransformer:
         else:
             featureShape = (self.bagSize, self.featureSize)
 
-        return sequenceShape, featureShape
+        return windowShape, featureShape
 
     def get_time_shape(self):
         if self.transfer:

@@ -46,8 +46,13 @@ def config_edit(args, parameter, value):
         yaml.dump(data, fb)
 
 
-def main(logger = False, regenerate = False, all_users = True, evaluation = False):
-    repeat = 3
+def main():
+    repeat = 1
+    mVerbose = False
+    evaluation = False
+    regenerate = True
+    all_users = False
+    logger = False
 
     if logger:
         sys.stdout = Logger()
@@ -72,7 +77,7 @@ def main(logger = False, regenerate = False, all_users = True, evaluation = Fals
                 if evaluation:
                     evaluate(SD, verbose=SD.shl_args.train_args['verbose'])
                 else:
-                    TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'])
+                    TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'], mVerbose=mVerbose)
 
     else:
         for j in range(repeat):

@@ -47,11 +47,11 @@ class Dataset:
         else:
 
             bData = buildData(args=self.shl_args,
-                               verbose=verbose,
-                               delete_dst=True,
-                               delete_tmp=True,
-                               delete_final=True,
-                               delete_filter=True)
+                              verbose=verbose,
+                              delete_dst=True,
+                              delete_tmp=True,
+                              delete_final=True,
+                              delete_filter=True)
 
             bData()
             del bData
@@ -59,8 +59,8 @@ class Dataset:
             xData = extractData(self.shl_args)
 
             self.acceleration, \
-            self.labels, \
-            self.location = xData()
+                self.labels, \
+                self.location = xData()
 
             del xData
 
@@ -120,11 +120,15 @@ class Dataset:
         self.accShape = None
         self.accTimeShape = None
         self.accTfrm = None
-        self.gpsSeriesShape = None
+        self.gpsWindowShape = None
         self.gpsFeaturesShape = None
         self.gpsTimeShape = None
         self.gpsTfrm = None
         self.lbsTfrm = None
+        self.inputShape = None
+        self.inputType = None
+        self.timeShape = None
+        self.timeType = None
         self.random = self.shl_args.train_args['randomize']
         self.train_indices = []
         self.val_indices = []
@@ -139,100 +143,93 @@ class Dataset:
 
     def to_bags(self):
 
-        tmp_location = []
-
-        bag_map = {
+        bagMap = {
             'acc': [[] for _ in range(self.bags)],
             'labels': [i for i in range(self.bags)],
             'gps': {}
         }
 
-        if self.syncing == 'Past':
-            gps_pivot = self.gpsDuration - 1
-        elif self.syncing == 'Present':
-            gps_pivot = self.gpsDuration // 2
-        elif self.syncing == 'Future':
-            gps_pivot = 0
-        else:
-            gps_pivot = self.gpsDuration - 1
-
-        pivot = 0
-        i = 0
-
-        while pivot < self.bags:
-            label = self.labels[pivot]
+        for i in range(self.bags):
+            label = self.labels[i]
             sample_index = label[1]
-            bag_map['acc'][i].append(sample_index)
+            bagMap['acc'][i].append(sample_index)
 
-            pivot += 1
-            i += 1
+        dailyGpsData = []
+        gpsPivot = None
+        if self.syncing == 'Past':
+            gpsPivot = self.gpsDuration - 1
+        elif self.syncing == 'Present':
+            gpsPivot = self.gpsDuration // 2
+        elif self.syncing == 'Future':
+            gpsPivot = 0
 
-        for pos_index, pos_name in enumerate(self.positions):
+        for index, position in enumerate(self.positions):
 
-            bag_map['gps'][pos_name] = [[] for _ in range(self.bags)]
+            bagMap['gps'][position] = [[] for _ in range(self.bags)]
 
-            if pos_name == self.whichGPS:
+            if position == self.whichGPS:
 
-                start = 0
-                tmp_n = 0
+                dailyStart = 0
+                NDaily = 0
+                searchStart = 0
 
                 for i, label in enumerate(self.labels):
 
-                    bag_user = label[-3]
-                    bag_day = label[-2]
-                    bag_time = label[-1]
+                    user = label[-3]
+                    day = label[-2]
+                    time = label[-1]
 
-                    if i == 0 or bag_user != self.labels[i - 1][-3] or bag_day != self.labels[i - 1][-2]:
+                    if i == 0 or user != self.labels[i - 1][-3] or day != self.labels[i - 1][-2]:
 
-                        start += tmp_n
-                        tmp_location = self.select_location(bag_user,
-                                                            bag_day,
-                                                            pos_index,
-                                                            start)
+                        dailyStart += NDaily
+                        dailyGpsData = self.select_location(user,
+                                                            day,
+                                                            index,
+                                                            dailyStart)
 
-                        tmp_n = tmp_location.shape[0]
-                        begin = 0
+                        NDaily = dailyGpsData.shape[0]
+                        searchStart = 0
 
                     else:
-                        if len(bag_map['gps'][pos_name][i-1]):
-                            begin = bag_map['gps'][pos_name][i-1][0]-start
+                        if len(bagMap['gps'][position][i - 1]):
+                            searchStart = bagMap['gps'][position][i - 1][0] - dailyStart
 
                     found = False
-                    for offset, location in enumerate(tmp_location[begin:]):
+                    for offset, GPS in enumerate(dailyGpsData[searchStart:]):
 
-                        distance = np.abs(location[gps_pivot, -1] - bag_time)
+                        timeDistance = np.abs(GPS[gpsPivot, -1] - time)
 
-                        if distance > self.syncThreshold:
+                        if timeDistance > self.syncThreshold:
                             if found:
                                 break
 
                         else:
                             found = True
-                            filled = np.sum(np.count_nonzero(location == -1, axis=1) == 0)
+                            filled = np.sum(np.count_nonzero(GPS == -1, axis=1) == 0)
                             if filled >= self.paddingThreshold:
-                                bag_map['gps'][pos_name][i].append(offset + begin + start)
+                                bagMap['gps'][position][i].append(offset + searchStart + dailyStart)
 
-            tmp_bag_map = []
+            thisBagMap = []
+            gpsBagSize = 1
+            for i, bag in enumerate(bagMap['gps'][position]):
 
-            for i, bag in enumerate(bag_map['gps'][pos_name]):
-
-                if len(bag) > 1:
+                if len(bag) > gpsBagSize:
                     divergence_list = []
-                    bag_loc = self.location[pos_index][bag]
-                    for loc in bag_loc:
-                        timestamp = loc[gps_pivot, -1]
+                    gpsBag = self.location[index][bag]
+                    for GPS in gpsBag:
+                        timestamp = GPS[gpsPivot, -1]
                         div = np.abs(self.labels[i, -1] - timestamp)
                         divergence_list.append(div)
 
-                    min_indices = np.argpartition(divergence_list, 1)[:1]
-                    tmp_bag_map.append([bag[index] for index in min_indices])
+                    closest = np.argpartition(divergence_list, gpsBagSize)[:gpsBagSize]
+                    thisBagMap.append([bag[c] for c in closest])
 
-                elif len(bag) <= 1:
-                    tmp_bag_map.append(bag)
+                elif len(bag) <= gpsBagSize:
+                    thisBagMap.append(bag)
 
-            bag_map['gps'][pos_name] = tmp_bag_map
+            bagMap['gps'][position] = thisBagMap
 
-        return bag_map
+        return bagMap
 
     def select_location(self, user, day, position, start):
         output = []
@@ -267,8 +264,8 @@ class Dataset:
             else:
                 self.accTfrm = temporalTransformer(
                     self.shl_args,
-                    accTransfer = accTransfer,
-                    accMIL = self.accMIL
+                    accTransfer=accTransfer,
+                    accMIL=self.accMIL
                 )
 
             self.accShape = self.accTfrm.get_shape()
@@ -276,33 +273,32 @@ class Dataset:
                 self.accTimeShape = self.accTfrm.get_time_shape()
 
         if not accTransfer:
-            self.gpsTfrm = gpsTransformer(shl_args=self.shl_args,
-                                          locTransfer=gpsTransfer)
-            self.gpsSeriesShape, self.gpsFeaturesShape = self.gpsTfrm.get_shape
+            self.gpsTfrm = gpsTransformer(shl_args=self.shl_args, gpsTransfer=gpsTransfer)
+            self.gpsWindowShape, self.gpsFeaturesShape = self.gpsTfrm.get_shape
             if timeInfo:
                 self.gpsTimeShape = self.gpsTfrm.get_time_shape()
 
         self.lbsTfrm = CategoricalTransformer()
 
         if gpsTransfer:
-            self.inputShape = (self.gpsSeriesShape, self.gpsFeaturesShape)
+            self.inputShape = (self.gpsWindowShape, self.gpsFeaturesShape)
             self.inputType = (tf.float64, tf.float64)
             if timeInfo:
-                self.timeShape = (self.gpsTimeShape, (3))
+                self.timeShape = (self.gpsTimeShape, 3)
                 self.timeType = (tf.float64, tf.float64)
 
         elif accTransfer:
             self.inputShape = (self.accShape, self.accBagSize)
             self.inputType = (tf.float64, tf.int32)
             if timeInfo:
-                self.timeShape = (self.accTimeShape, (3))
+                self.timeShape = (self.accTimeShape, 3)
                 self.timeType = (tf.float64, tf.float64)
 
         else:
-            self.inputShape = (self.accShape, self.gpsSeriesShape, self.gpsFeaturesShape, self.accBagSize)
+            self.inputShape = (self.accShape, self.gpsWindowShape, self.gpsFeaturesShape, self.accBagSize)
             self.inputType = (tf.float64, tf.float64, tf.float64, tf.int32)
             if timeInfo:
-                self.timeShape = (self.accTimeShape, self.gpsTimeShape, (3))
+                self.timeShape = (self.accTimeShape, self.gpsTimeShape, 3)
                 self.timeType = (tf.float64, tf.float64, tf.float64)
 
     def accFeatures(self, acceleration, position):
@@ -334,7 +330,7 @@ class Dataset:
         coef2Hz = freq_magnitude[2]
         coef3Hz = freq_magnitude[3]
 
-        acc_features = [var, coef1Hz, coef2Hz, coef3Hz, acceleration[0][0][-3],acceleration[0][0][-2]]
+        acc_features = [var, coef1Hz, coef2Hz, coef3Hz, acceleration[0][0][-3], acceleration[0][0][-2]]
 
         return acc_features
 
@@ -421,7 +417,7 @@ class Dataset:
 
             locBag = []
             for pos_i, pos in enumerate(self.positions):
-                locBag.append(self.location[pos_i][self.gps_bags[pos][i]])
+                locBag.append(self.location[pos_i][self.gpsBags[pos][i]])
 
             LocFeature, LocTime, Accuracy, Lat, Lon = self.locFeatures(locBag)
 
@@ -430,14 +426,14 @@ class Dataset:
 
             del locBag
 
-            AccFeatures = self.accFeatures(self.acceleration[self.acc_bags[i]],
+            AccFeatures = self.accFeatures(self.acceleration[self.accBags[i]],
                                            position=position)
 
-            Lb = self.labels[self.lbs_bags[i]][0] - 1
+            Lb = self.labels[self.lbsBags[i]][0] - 1
             if motorized_class:
                 Lb = Lb if Lb < 4 else 4
 
-            Time = self.labels[self.lbs_bags[i]][-1]
+            Time = self.labels[self.lbsBags[i]][-1]
 
             if en == 0:
                 data = [[LocFeature, Accuracy, Lat, Lon, *AccFeatures, LocTime, Time, position, Lb]]
@@ -445,7 +441,9 @@ class Dataset:
             else:
                 data.append([LocFeature, Accuracy, Lat, Lon, *AccFeatures, LocTime, Time, position, Lb])
 
-        data = pd.DataFrame(data, columns=['vel', 'acc', 'lat', 'lon', 'var', '1Hz', '2Hz', '3Hz', 'User', 'Day', 'GPS Time', 'Label Time', 'Position', 'Label'])
+        data = pd.DataFrame(data,
+                            columns=['vel', 'acc', 'lat', 'lon', 'var', '1Hz', '2Hz', '3Hz', 'User', 'Day', 'GPS Time',
+                                     'Label Time', 'Position', 'Label'])
 
         return data
 
@@ -463,7 +461,6 @@ class Dataset:
 
         def gen():
 
-
             for index in indices:
 
                 if not gpsTransfer:
@@ -476,13 +473,13 @@ class Dataset:
 
                 if not gpsTransfer:
                     if timeInfo:
-                        accBag, accTime = self.accTfrm(self.acceleration[self.acc_bags[i]],
+                        accBag, accTime = self.accTfrm(self.acceleration[self.accBags[i]],
                                                        is_train=not (is_val or is_test),
                                                        position=position, timeInfo=timeInfo)
                     else:
                         try:
-                            accBag = self.accTfrm(self.acceleration[self.acc_bags[i]], is_train = not (is_val or is_test),
-                                                  position = position)
+                            accBag = self.accTfrm(self.acceleration[self.accBags[i]], is_train=not (is_val or is_test),
+                                                  position=position)
                         except:
                             print(i)
 
@@ -492,16 +489,17 @@ class Dataset:
 
                 if not accTransfer:
                     if timeInfo:
-                        location = self.location[self.positions.index(self.whichGPS)][self.gps_bags[self.whichGPS][i]]
-                        gpsSeries, gpsFeatures, gpsTime = self.gpsTfrm(location, timeInfo=timeInfo, is_train = not (is_val or is_test))
+                        location = self.location[self.positions.index(self.whichGPS)][self.gpsBags[self.whichGPS][i]]
+                        gpsSeries, gpsFeatures, gpsTime = self.gpsTfrm(location, timeInfo=timeInfo,
+                                                                       is_train=not (is_val or is_test))
                     else:
-                        location = self.location[self.positions.index(self.whichGPS)][self.gps_bags[self.whichGPS][i]]
-                        gpsSeries, gpsFeatures = self.gpsTfrm(location, is_train = not (is_val or is_test))
+                        location = self.location[self.positions.index(self.whichGPS)][self.gpsBags[self.whichGPS][i]]
+                        gpsSeries, gpsFeatures = self.gpsTfrm(location, is_train=not (is_val or is_test))
 
                 if timeInfo:
-                    y, yTime = self.lbsTfrm(self.labels[self.lbs_bags[i]], timeInfo=timeInfo)
+                    y, yTime = self.lbsTfrm(self.labels[self.lbsBags[i]], timeInfo=timeInfo)
                 else:
-                    y = self.lbsTfrm(self.labels[self.lbs_bags[i]])
+                    y = self.lbsTfrm(self.labels[self.lbsBags[i]])
 
                 if timeInfo:
                     if gpsTransfer:
@@ -547,12 +545,12 @@ class Dataset:
     def batch_and_prefetch(self, train, val, test):
 
         return train.cache().shuffle(1000).repeat() \
-                   .batch(batch_size=self.trainBatchSize) \
-                   .prefetch(tf.data.AUTOTUNE), \
-               val.cache().shuffle(1000).repeat() \
-                   .batch(batch_size=self.valBatchSize).prefetch(tf.data.AUTOTUNE), \
-               test.cache().shuffle(1000).repeat() \
-                   .batch(batch_size=self.testBatchSize).prefetch(tf.data.AUTOTUNE)
+            .batch(batch_size=self.trainBatchSize) \
+            .prefetch(tf.data.AUTOTUNE), \
+            val.cache().shuffle(1000).repeat() \
+                .batch(batch_size=self.valBatchSize).prefetch(tf.data.AUTOTUNE), \
+            test.cache().shuffle(1000).repeat() \
+                .batch(batch_size=self.testBatchSize).prefetch(tf.data.AUTOTUNE)
 
     def split_train_val(self, dataIndices):
 
@@ -608,7 +606,6 @@ class Dataset:
 
     def split_train_val_test(self, seed=1):
         self.test_indices = []
-
         if self.complete:
 
             with temp_seed(seed):
@@ -673,7 +670,7 @@ class Dataset:
         positions = len(self.positions)
         inputs = [[[] for _ in range(4)] for _ in range(positions)]
 
-        for index, (label, day, time, user) in enumerate(zip(self.labels[:,  0],
+        for index, (label, day, time, user) in enumerate(zip(self.labels[:, 0],
                                                              self.labels[:, -2],
                                                              self.labels[:, -1],
                                                              self.labels[:, -3])):
@@ -690,12 +687,12 @@ class Dataset:
                 for pos_j, position in enumerate(pos):
 
                     accBag = self.accTfrm(
-                        self.acceleration[self.acc_bags[index]],
+                        self.acceleration[self.accBags[index]],
                         is_train=False,
                         position=position
                     )
 
-                    location = self.location[self.positions.index(self.whichGPS)][self.gps_bags[self.whichGPS][index]]
+                    location = self.location[self.positions.index(self.whichGPS)][self.gpsBags[self.whichGPS][index]]
                     gpsSeries, gpsFeatures = self.gpsTfrm(location, is_train=False)
 
                     if pos_j == 0:
@@ -713,7 +710,7 @@ class Dataset:
                     for pos_j in range(positions):
                         true.extend(true_sequence)
                         predicted.extend(
-                            np.argmax(Model.predict([np.array(inputs[pos_j][i]) for i in range(4)], verbose = 0), axis=1))
+                            np.argmax(Model.predict([np.array(inputs[pos_j][i]) for i in range(4)], verbose=0), axis=1))
                         lengths.append(length)
 
                     inputs = [[[] for _ in range(4)] for _ in range(positions)]
@@ -903,10 +900,9 @@ class Dataset:
                  seed=1):
 
         if randomTree:
-
             motorized = True
             bags = self.to_bags()
-            self.acc_bags, self.lbs_bags, self.gps_bags = bags['acc'], bags['labels'], bags['gps']
+            self.accBags, self.lbsBags, self.gpsBags = bags['acc'], bags['labels'], bags['gps']
             del bags
 
             self.split_train_val_test()
@@ -936,7 +932,7 @@ class Dataset:
 
             bags = self.to_bags()
 
-            self.acc_bags, self.lbs_bags, self.gps_bags = bags['acc'], bags['labels'], bags['gps']
+            self.accBags, self.lbsBags, self.gpsBags = bags['acc'], bags['labels'], bags['gps']
 
             self.split_train_val_test(seed=seed)
 
