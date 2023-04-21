@@ -26,7 +26,7 @@ data_args:
 
 train_args:
 
-  pair_threshold: 60000
+  pair_threshold: 60
 
   accBagSize: 3 # odd for Present
   accBagStride: 1200
@@ -86,8 +86,8 @@ train_args:
   transfer_learning_acc: train #[train, load, none]
   transfer_learning_loc: none   #[train, load, none]
 
-  transition_threshold: 30000
-  post: false
+  transition_threshold: 120
+  post: true
 
   verbose: 1
   heads: 1

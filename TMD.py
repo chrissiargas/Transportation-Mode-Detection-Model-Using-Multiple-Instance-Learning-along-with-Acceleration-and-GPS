@@ -207,7 +207,7 @@ def getGpsEncoder(input_shapes, args, L):
     bnLayer = BatchNormalization(name='locBatch', trainable=False)
     X = bnLayer(X)
 
-    lstmLayer = tf.keras.layers.LSTM(units=128, name='locLSTM')
+    lstmLayer = LSTM(units=128, name='locLSTM')
     X = lstmLayer(X)
 
     X = tf.concat([X, gpsFeatures], axis=1)
@@ -671,18 +671,18 @@ def TMD_MIL(data: Dataset,
         HMM.transmat_ = transition
         HMM.emissionprob_ = confusion
 
-        x, y, lengths = data.postprocess(Model=TMDMiller)
+        y_, y, lengths = data.postprocess(Model=TMDMiller, verbose = True)
 
-        y_ = HMM.predict(x, lengths)
-        accuracy = accuracy_score(y, y_)
-        f1 = f1_score(y, y_, average='macro')
+        postY_ = HMM.predict(y_, lengths)
+        accuracy = accuracy_score(y, postY_)
+        f1 = f1_score(y, postY_, average='macro')
 
         print()
         print('Accuracy with post-processing: {}'.format(accuracy))
         print('F1-Score with post-processing: {}'.format(f1))
 
-        accuracy = accuracy_score(y, x)
-        f1 = f1_score(y, x, average='macro')
+        accuracy = accuracy_score(y, y_)
+        f1 = f1_score(y, y_, average='macro')
 
         print('Accuracy without post-processing: {}'.format(accuracy))
         print('F1-Score without post-processing: {}'.format(f1))

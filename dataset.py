@@ -114,7 +114,8 @@ class Dataset:
         self.postprocessing = self.shl_args.train_args['post']
         self.syncing = self.shl_args.data_args['sync']
         self.gpsDuration = self.shl_args.data_args['locDuration']
-        self.syncThreshold = self.shl_args.train_args['pair_threshold']
+        self.syncThreshold = self.shl_args.train_args['pair_threshold'] * 1000
+        self.transThreshold = self.shl_args.train_args['transition_threshold'] * 1000
         self.paddingThreshold = self.gpsDuration
         self.useSpectro = self.shl_args.train_args['use_spectrograms']
         self.accShape = None
@@ -660,7 +661,7 @@ class Dataset:
 
             self.split_train_val(train_val_indices)
 
-    def postprocess(self, Model):
+    def postprocess(self, Model, verbose = False):
 
         predicted = []
         true = []
@@ -704,7 +705,7 @@ class Dataset:
                     inputs[pos_j][2].append(gpsFeatures)
                     inputs[pos_j][3].append(position)
 
-                if index == self.bags - 1 or self.labels[index + 1][-1] - time > self.syncThreshold \
+                if index == self.bags - 1 or self.labels[index + 1][-1] - time > self.transThreshold \
                         or self.labels[index + 1][-2] != day or self.labels[index + 1][-3] != user:
 
                     for pos_j in range(positions):
@@ -720,6 +721,15 @@ class Dataset:
         predicted = np.array(predicted)
         predicted = np.reshape(predicted, (-1, 1))
         true = np.array(true)
+
+        if verbose:
+            s = 0
+            for length in lengths:
+                print(length)
+                print(true[s : s+length])
+                print(predicted[s : s+length])
+                s += length
+
         return predicted, true, lengths
 
     def sensor_position(self, accTransfer=False, gpsTransfer=False, randomTree=False):

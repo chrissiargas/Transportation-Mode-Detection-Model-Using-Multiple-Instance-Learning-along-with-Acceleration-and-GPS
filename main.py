@@ -23,9 +23,6 @@ class Logger(object):
         self.log.write(message)
 
     def flush(self):
-        # this flush method is needed for python 3 compatibility.
-        # this handles the flush command by doing nothing.
-        # you might want to specify some extra behavior here.
         pass
 
 
@@ -50,22 +47,25 @@ def main():
     repeat = 1
     mVerbose = False
     evaluation = False
-    regenerate = True
-    all_users = False
+    regenerate = False
+    all_users = True
     logger = False
 
     if logger:
         sys.stdout = Logger()
 
+    regenerated = False
     if all_users:
-        for j in range(repeat):
-            for i, test_user in enumerate([1,2,3]):
+        for _ in range(repeat):
+            for test_user in [1,2,3]:
 
                 print('USER: ' + str(test_user))
 
                 config_edit('train_args', 'test_user', test_user)
 
-                regenerate = regenerate if i == j == 0 else False
+                regenerate = regenerate if regenerated else False
+                regenerated = True
+
                 SD = Dataset(regenerate=regenerate)
 
                 if logger:
@@ -80,8 +80,10 @@ def main():
                     TMD_MIL(SD, summary=True, verbose=SD.shl_args.train_args['verbose'], mVerbose=mVerbose)
 
     else:
-        for j in range(repeat):
-            regenerate = regenerate if j == 0 else False
+        for _ in range(repeat):
+            regenerate = regenerate if regenerated else False
+            regenerated = False
+
             SD = Dataset(regenerate=regenerate)
 
             if logger:
