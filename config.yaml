@@ -1,7 +1,7 @@
 data_args:
 
   dataset: Preview #[CompleteUser1, Preview]
-  accDuration: 1200
+  accDuration: 1800
   accStride: 1200
 
   locDuration: 12   #samples
@@ -30,7 +30,7 @@ train_args:
 
   accBagSize: 3 # odd for Present
   accBagStride: 1200
-  accDuration: 1200
+  accDuration: 1800
   sync: Present # [ Past, Present, Future ]
 
   acc_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation']

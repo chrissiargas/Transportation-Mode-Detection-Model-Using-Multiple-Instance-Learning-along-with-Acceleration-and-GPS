@@ -63,7 +63,7 @@ def main():
 
                 config_edit('train_args', 'test_user', test_user)
 
-                regenerate = regenerate if regenerated else False
+                regenerate = regenerate if not regenerated else False
                 regenerated = True
 
                 SD = Dataset(regenerate=regenerate)
@@ -81,7 +81,7 @@ def main():
 
     else:
         for _ in range(repeat):
-            regenerate = regenerate if regenerated else False
+            regenerate = regenerate if not regenerated else False
             regenerated = False
 
             SD = Dataset(regenerate=regenerate)

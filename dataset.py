@@ -478,15 +478,8 @@ class Dataset:
                                                        is_train=not (is_val or is_test),
                                                        position=position, timeInfo=timeInfo)
                     else:
-                        try:
-                            accBag = self.accTfrm(self.acceleration[self.accBags[i]], is_train=not (is_val or is_test),
-                                                  position=position)
-                        except:
-                            print(i)
-
-                            print(position)
-
-                            # print(self.test_indices)
+                        accBag = self.accTfrm(self.acceleration[self.accBags[i]], is_train=not (is_val or is_test),
+                                              position=position)
 
                 if not accTransfer:
                     if timeInfo:
@@ -727,7 +720,7 @@ class Dataset:
             for length in lengths:
                 print(length)
                 print(true[s : s+length])
-                print(predicted[s : s+length])
+                print(predicted[s : s+length,0])
                 s += length
 
         return predicted, true, lengths
