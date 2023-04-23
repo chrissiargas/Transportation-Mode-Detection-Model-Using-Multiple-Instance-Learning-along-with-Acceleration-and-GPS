@@ -21,18 +21,18 @@ def temp_seed(seed):
 
 class Dataset:
 
-    def __init__(self, regenerate=False, verbose=False):
+    def __init__(self, regenerate=False):
 
         parser = Parser()
         self.shl_args = parser.get_args()
-        self.verbose = verbose
+        self.verbose = self.shl_args.train_args['verbose']
 
         if not regenerate:
             xData = extractData(self.shl_args)
 
             if not xData.found:
 
-                bData = buildData(args=self.shl_args, verbose=verbose)
+                bData = buildData(args=self.shl_args, verbose=self.verbose)
 
                 bData()
                 del bData
@@ -47,7 +47,7 @@ class Dataset:
         else:
 
             bData = buildData(args=self.shl_args,
-                              verbose=verbose,
+                              verbose=self.verbose,
                               delete_dst=True,
                               delete_tmp=True,
                               delete_final=True,
@@ -111,7 +111,6 @@ class Dataset:
         self.accMIL = self.shl_args.train_args['separate_MIL']
         self.lr = self.shl_args.train_args['learning_rate']
         self.epochs = self.shl_args.train_args['epochs']
-        self.postprocessing = self.shl_args.train_args['post']
         self.syncing = self.shl_args.data_args['sync']
         self.gpsDuration = self.shl_args.data_args['locDuration']
         self.syncThreshold = self.shl_args.train_args['pair_threshold'] * 1000
@@ -654,7 +653,7 @@ class Dataset:
 
             self.split_train_val(train_val_indices)
 
-    def postprocess(self, Model, verbose = False):
+    def getPredictions(self, Model, verbose = False):
 
         predicted = []
         true = []

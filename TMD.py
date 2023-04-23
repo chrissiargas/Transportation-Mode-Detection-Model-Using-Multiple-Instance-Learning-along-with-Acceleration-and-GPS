@@ -439,7 +439,9 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
 def TMD_MIL(data: Dataset,
             summary=False,
             verbose=0,
-            mVerbose=False):
+            mVerbose=False,
+            postprocessing=True):
+
     L = 256
     D = 128
 
@@ -656,7 +658,18 @@ def TMD_MIL(data: Dataset,
 
     TMDMiller.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    if data.postprocessing:
+    y_, y, lengths = data.getPredictions(Model=TMDMiller, verbose=False)
+
+    accuracy = accuracy_score(y, y_)
+    f1 = f1_score(y, y_, average='macro')
+
+    print('Accuracy without post-processing: {}'.format(accuracy))
+    print('F1-Score without post-processing: {}'.format(f1))
+
+    postAccuracy = None
+    postF1 = None
+
+    if postprocessing:
         params = hmmParams()
         confusion, transition = params(data.complete, data.testUser)
 
@@ -671,25 +684,16 @@ def TMD_MIL(data: Dataset,
         HMM.transmat_ = transition
         HMM.emissionprob_ = confusion
 
-        y_, y, lengths = data.postprocess(Model=TMDMiller, verbose = True)
-
         postY_ = HMM.predict(y_, lengths)
-        accuracy = accuracy_score(y, postY_)
-        f1 = f1_score(y, postY_, average='macro')
+        postAccuracy = accuracy_score(y, postY_)
+        postF1 = f1_score(y, postY_, average='macro')
 
-        print()
-        print('Accuracy with post-processing: {}'.format(accuracy))
-        print('F1-Score with post-processing: {}'.format(f1))
-
-        accuracy = accuracy_score(y, y_)
-        f1 = f1_score(y, y_, average='macro')
-
-        print('Accuracy without post-processing: {}'.format(accuracy))
-        print('F1-Score without post-processing: {}'.format(f1))
+        print('Accuracy with post-processing: {}'.format(postAccuracy))
+        print('F1-Score with post-processing: {}'.format(postF1))
 
     del data.acceleration
     del data.location
     del data.labels
     del data
 
-    return
+    return accuracy, f1, postAccuracy, postF1

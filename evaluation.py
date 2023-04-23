@@ -13,7 +13,7 @@ from hmmlearn.hmm import MultinomialHMM
 from sklearn.metrics import f1_score, accuracy_score
 
 
-def evaluate(data: Dataset, verbose=0):
+def evaluate(data: Dataset, verbose=0, postprocessing = True):
     L = 256
     D = 128
 
@@ -125,41 +125,42 @@ def evaluate(data: Dataset, verbose=0):
 
     Model.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    if data.postprocessing:
+    y_, y, lengths = data.getPredictions(Model=Model)
+
+    accuracy = accuracy_score(y, y_)
+    f1 = f1_score(y, y_, average='macro')
+
+    print('Accuracy without post-processing: {}'.format(accuracy))
+    print('F1-Score without post-processing: {}'.format(f1))
+
+    postAccuracy = None
+    postF1 = None
+
+    if postprocessing:
         params = hmmParams()
-        conf, trans = params(data.complete, data.testUser)
+        confusion, transition = params(data.complete, data.testUser)
 
         startprob = [1. / 8 for _ in range(8)]
 
         HMM = MultinomialHMM(n_components=8,
                              algorithm='viterbi',
                              random_state=93,
-                             n_iter=100
-                             )
+                             n_iter=100)
 
         HMM.startprob_ = startprob
-        HMM.transmat_ = trans
-        HMM.emissionprob_ = conf
+        HMM.transmat_ = transition
+        HMM.emissionprob_ = confusion
 
-        x, y, lengths = data.postprocess(Model=Model)
+        postY_ = HMM.predict(y_, lengths)
+        postAccuracy = accuracy_score(y, postY_)
+        postF1 = f1_score(y, postY_, average='macro')
 
-        y_ = HMM.predict(x, lengths)
-        accuracy = accuracy_score(y, y_)
-        f1 = f1_score(y, y_, average='macro')
-
-        print()
-        print('Accuracy with post-processing: {}'.format(accuracy))
-        print('F1-Score with post-processing: {}'.format(f1))
-
-        accuracy = accuracy_score(y, x)
-        f1 = f1_score(y, x, average='macro')
-
-        print('Accuracy without post-processing: {}'.format(accuracy))
-        print('F1-Score without post-processing: {}'.format(f1))
+        print('Accuracy with post-processing: {}'.format(postAccuracy))
+        print('F1-Score with post-processing: {}'.format(postF1))
 
     del data.acceleration
     del data.location
     del data.labels
     del data
 
-    return
+    return accuracy, f1, postAccuracy, postF1

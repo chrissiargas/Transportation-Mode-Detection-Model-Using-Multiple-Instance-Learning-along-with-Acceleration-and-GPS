@@ -1,7 +1,7 @@
 data_args:
 
   dataset: Preview #[CompleteUser1, Preview]
-  accDuration: 1800
+  accDuration: 1200
   accStride: 1200
 
   locDuration: 12   #samples
@@ -28,9 +28,11 @@ train_args:
 
   pair_threshold: 60
 
+
+
   accBagSize: 3 # odd for Present
   accBagStride: 1200
-  accDuration: 1800
+  accDuration: 1200
   sync: Present # [ Past, Present, Future ]
 
   acc_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation']
@@ -87,7 +89,6 @@ train_args:
   transfer_learning_loc: none   #[train, load, none]
 
   transition_threshold: 120
-  post: true
 
   verbose: 1
   heads: 1
