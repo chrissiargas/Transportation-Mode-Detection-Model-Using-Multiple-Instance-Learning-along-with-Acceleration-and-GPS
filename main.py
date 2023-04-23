@@ -74,7 +74,8 @@ def scores_save():
         meanPerUser.columns = [str(col) + '_mean' for col in meanPerUser.columns]
         stdPerUser.columns = [str(col) + '_std' for col in stdPerUser.columns]
         stats = pd.concat([meanPerUser, stdPerUser], axis=1)
-        stats.loc['all'] = stats.mean()
+        stats.loc['All'] = stats.mean()
+        stats['Test User'] = stats.index
 
     else:
 
@@ -92,7 +93,7 @@ def scores_save():
 
 def execute():
     repeat = 10
-    evaluation = False
+    evaluation = True
     regenerate = False
     all_users = True
     logger = False
@@ -134,13 +135,13 @@ def execute():
                                                        postprocessing=postprocessing)
 
                 if postprocessing:
-                    theseScores = {'Test User': test_user,
+                    theseScores = {'Test User': str(test_user),
                                    'Accuracy': acc,
                                    'F1-Score': f1,
                                    'post-Accuracy': postAcc,
                                    'post-F1-Score': postF1}
                 else:
-                    theseScores = {'Test User': test_user,
+                    theseScores = {'Test User': str(test_user),
                                    'Accuracy': acc,
                                    'F1-Score': f1}
 

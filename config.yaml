@@ -72,7 +72,7 @@ train_args:
   trainBatchSize: 32
   testBatchSize: 32
 
-  test_user: 1
+  test_user: 2
 
   val_percentage: 0.15          # used if stratify == concentrated
   randomize: true
