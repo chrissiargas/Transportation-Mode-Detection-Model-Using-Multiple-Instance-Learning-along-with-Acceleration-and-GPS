@@ -91,13 +91,14 @@ def scores_save():
     stats.to_csv(statsFile, index=False)
 
 
-def execute():
-    repeat = 10
-    evaluation = True
-    regenerate = False
-    all_users = True
-    logger = False
-    postprocessing = True
+def execute(repeat = 10,
+            evaluation = False,
+            regenerate = False,
+            all_users = True,
+            logger = False,
+            postprocessing = True,
+            mVerbose = False):
+
     global scores
 
     if logger:
@@ -132,7 +133,8 @@ def execute():
                     acc, f1, postAcc, postF1 = TMD_MIL(data=data,
                                                        summary=True,
                                                        verbose=data.verbose,
-                                                       postprocessing=postprocessing)
+                                                       postprocessing=postprocessing,
+                                                       mVerbose=mVerbose)
 
                 if postprocessing:
                     theseScores = {'Test User': str(test_user),
@@ -146,6 +148,8 @@ def execute():
                                    'F1-Score': f1}
 
                 scores = scores.append(theseScores, ignore_index=True)
+
+            save()
 
     else:
         for _ in range(repeat):
@@ -169,7 +173,8 @@ def execute():
                 acc, f1, postAcc, postF1 = TMD_MIL(data=data,
                                                    summary=True,
                                                    verbose=data.verbose,
-                                                   postprocessing=postprocessing)
+                                                   postprocessing=postprocessing,
+                                                   mVerbose=mVerbose)
 
             if postprocessing:
                 theseScores = {'Accuracy': acc,
@@ -194,8 +199,22 @@ def save():
 
 
 def main():
+    repeat = 10
+    evaluation = False
+    regenerate = False
+    all_users = True
+    logger = False
+    postprocessing = True
+    mVerbose = False
+
     try:
-        execute()
+        execute(repeat = repeat,
+                evaluation = evaluation,
+                regenerate = regenerate,
+                all_users = all_users,
+                logger = logger,
+                postprocessing = postprocessing,
+                mVerbose = mVerbose)
     finally:
         save()
 
