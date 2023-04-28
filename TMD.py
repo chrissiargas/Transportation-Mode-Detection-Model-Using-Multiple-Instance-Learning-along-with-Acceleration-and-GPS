@@ -207,7 +207,7 @@ def getGpsEncoder(input_shapes, args, L):
     bnLayer = BatchNormalization(name='locBatch', trainable=False)
     X = bnLayer(X)
 
-    lstmLayer = LSTM(units=128, name='locLSTM')
+    lstmLayer = Bidirectional(LSTM(units=64, name='locLSTM'))
     X = lstmLayer(X)
 
     X = tf.concat([X, gpsFeatures], axis=1)
