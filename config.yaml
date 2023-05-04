@@ -28,12 +28,10 @@ train_args:
 
   pair_threshold: 60
 
-
-
   accBagSize: 3 # odd for Present
   accBagStride: 1200
   accDuration: 1200
-  sync: Present # [ Past, Present, Future ]
+  sync: Present # Past, Present, Future
 
   acc_augmentation:            #['Jittering','Permutation','TimeWarp','Rotation']
 
@@ -45,12 +43,13 @@ train_args:
   - Jerk
 
   use_spectrograms: true
+  freq_interpolation: linear # linear, log
   specto_window: 10  #seconds
   specto_overlap: 9.5 #seconds
   specto_augment: [frequencyMask, timeMask]  #[timeWarp, frequencyMask, timeMask, randomMask]
   acc_concat: Depth # [Depth, Frequency]
   acc_shape: 2D # [1D, 2D]
-  acc_channel: Time # [Frequency, Time]
+  acc_channel: Frequency # [Frequency, Time]
 
   gps_augmentation: true
 
@@ -93,7 +92,7 @@ train_args:
   verbose: 1
   heads: 1
 
-  random_position: true
+  random_position: false
 
 
 

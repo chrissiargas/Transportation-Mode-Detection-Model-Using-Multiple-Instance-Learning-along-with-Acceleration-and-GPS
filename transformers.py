@@ -1,7 +1,9 @@
+
 from scipy.signal import spectrogram
 from scipy.interpolate import interp2d
 from augment import *
 from gpsProcessing import *
+from mySpectrogram import LogBands, my_tvs, my_tvs2
 
 
 class CategoricalTransformer:
@@ -187,7 +189,7 @@ class temporalTransformer:
                 return outputs
 
 
-class spectrogramTransformer():
+class spectrogramTransformer:
 
     def __init__(self,
                  shl_args,
@@ -213,6 +215,8 @@ class spectrogramTransformer():
         self.channels = len(shl_args.train_args['acc_signals'])
         self.height, self.width = self.out_size
         self.syncing = shl_args.train_args['sync']
+        self.log = shl_args.train_args['freq_interpolation'] == 'log'
+        self.mySpectro = True
 
         self.temp_tfrm = temporalTransformer(shl_args=shl_args,
                                              preprocessing=True)
@@ -230,10 +234,14 @@ class spectrogramTransformer():
         out_f, out_t = self.out_size
         out_spectrograms = np.zeros((samples, out_f, out_t), dtype=np.float64)
 
-        log_f = np.log(freq + freq[1])
+        if self.log:
+            log_f = np.log(freq + freq[1])
+            log_f_normalized = (log_f - log_f[0]) / (log_f[-1] - log_f[0])
+            f = out_f * log_f_normalized
 
-        log_f_normalized = (log_f - log_f[0]) / (log_f[-1] - log_f[0])
-        f = out_f * log_f_normalized
+        else:
+            f_normalized = (freq - freq[0]) / (freq[-1] - freq[0])
+            f = out_f * f_normalized
 
         t_normalized = (time - time[0]) / (time[-1] - time[0])
         t = out_t * t_normalized
@@ -311,12 +319,32 @@ class spectrogramTransformer():
 
         for thisSignal in signals.keys():
 
-            f, t, thisSpectrogram = spectrogram(signals[thisSignal],
-                                                fs=self.freq,
-                                                nperseg=self.nperseg,
-                                                noverlap=self.noverlap)
+            if self.mySpectro:
+                samples = signals[thisSignal].shape[0]
+                out_f, out_t = self.out_size
+                thisSpectrogram = np.zeros((samples, out_f, out_t), dtype=np.float64)
 
-            thisSpectrogram = self.log_inter(thisSpectrogram, f, t)
+                nfft = 2 * out_f - 1
+
+                for i, signal in enumerate(signals[thisSignal]):
+                    if self.log:
+                        nfft = 100 * (2 * out_f - 1)
+                        t1, w1, Sxx1 = my_tvs2(signal, wsize=50, num_of_windows=out_t, nfft=nfft)
+                        log_bands = LogBands(len(w1))
+                        thisSpectrogram[i, :, :] = log_bands.apply(Sxx1)
+
+                    else:
+                        _, _, Sxx = my_tvs2(signal, wsize=nfft, num_of_windows=out_t, nfft=nfft)
+                        thisSpectrogram[i, :, :] = Sxx
+
+            else:
+
+                f, t, thisSpectrogram = spectrogram(signals[thisSignal],
+                                                    fs=self.freq,
+                                                    nperseg=self.nperseg,
+                                                    noverlap=self.noverlap)
+
+                thisSpectrogram = self.log_inter(thisSpectrogram, f, t)
 
             if is_train:
                 thisSpectrogram = masking(thisSpectrogram)

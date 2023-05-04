@@ -96,7 +96,7 @@ def execute(repeat = 10,
             regenerate = False,
             all_users = True,
             logger = False,
-            postprocessing = True,
+            postprocessing = False,
             mVerbose = False):
 
     global scores
