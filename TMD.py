@@ -98,7 +98,7 @@ def getAccEncoder(input_shapes, args, L, transfer=False):
     if shape == '1D':
         paddingLayer = ZeroPadding1D(padding=1)
         conv1D = Conv1D(
-            filters=16,
+            filters=64,
             kernel_size=3,
             strides=1,
             padding='valid',
@@ -117,7 +117,7 @@ def getAccEncoder(input_shapes, args, L, transfer=False):
 
         paddingLayer = ZeroPadding1D(padding=1)
         conv1D = Conv1D(
-            filters=32,
+            filters=64,
             kernel_size=3,
             strides=1,
             padding='valid',
@@ -658,7 +658,7 @@ def TMD_MIL(data: Dataset,
 
     TMDMiller.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    y_, y, lengths = data.getPredictions(Model=TMDMiller, verbose=False)
+    y_, y, lengths = data.yToSequence(Model=TMDMiller, verbose=False)
 
     accuracy = accuracy_score(y, y_)
     f1 = f1_score(y, y_, average='macro')

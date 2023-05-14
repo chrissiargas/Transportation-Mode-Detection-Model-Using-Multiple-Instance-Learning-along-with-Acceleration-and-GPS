@@ -125,7 +125,7 @@ def evaluate(data: Dataset, verbose=0, postprocessing = True):
 
     Model.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    y_, y, lengths = data.getPredictions(Model=Model)
+    y_, y, lengths = data.yToSequence(Model=Model)
 
     accuracy = accuracy_score(y, y_)
     f1 = f1_score(y, y_, average='macro')

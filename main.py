@@ -9,13 +9,8 @@ import os
 from evaluation import evaluate
 import pandas as pd
 
-
 savePath = os.path.join("saves", "save-" + time.strftime("%Y%m%d-%H%M%S"))
-
 terminalFile = os.path.join(savePath, "terminal.txt")
-scoresFile = os.path.join(savePath, "scores.csv")
-statsFile = os.path.join(savePath, "stats.csv")
-paramsFile = os.path.join(savePath, "parameters.yaml")
 
 scores = pd.DataFrame()
 
@@ -45,7 +40,6 @@ def config_edit(args, parameter, value):
     for param in data[args]:
 
         if param == parameter:
-
             data[args][param] = value
             break
 
@@ -53,7 +47,7 @@ def config_edit(args, parameter, value):
         yaml.dump(data, fb)
 
 
-def config_save():
+def config_save(paramsFile):
     yaml = ruamel.yaml.YAML()
 
     with open('config.yaml') as fp:
@@ -63,7 +57,7 @@ def config_save():
         yaml.dump(parameters, fb)
 
 
-def scores_save():
+def scores_save(scoresFile, statsFile):
     scores.to_csv(scoresFile, index=False)
     stats = pd.DataFrame()
 
@@ -91,14 +85,14 @@ def scores_save():
     stats.to_csv(statsFile, index=False)
 
 
-def execute(repeat = 10,
-            evaluation = False,
-            regenerate = False,
-            all_users = True,
-            logger = False,
-            postprocessing = False,
-            mVerbose = False):
-
+def execute(repeat=10,
+            evaluation=False,
+            regenerate=False,
+            all_users=True,
+            logger=False,
+            postprocessing=False,
+            mVerbose=False,
+            hparams=None):
     global scores
 
     if logger:
@@ -149,7 +143,7 @@ def execute(repeat = 10,
 
                 scores = scores.append(theseScores, ignore_index=True)
 
-            save()
+                save(hparams)
 
     else:
         for _ in range(repeat):
@@ -188,41 +182,60 @@ def execute(repeat = 10,
             scores = scores.append(theseScores, ignore_index=True)
 
 
-def save():
-    try:
-        os.makedirs(savePath)
-    except OSError as e:
-        print("Error: %s - %s." % (e.filename, e.strerror))
+def save(hparams=None):
+    if not hparams:
+        try:
+            path = savePath
+            os.makedirs(savePath)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
 
-    scores_save()
-    config_save()
+    else:
+        try:
+            path = os.path.join(savePath, hparams)
+            os.makedirs(path)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
+
+    scoresFile = os.path.join(path, "scores.csv")
+    statsFile = os.path.join(path, "stats.csv")
+    paramsFile = os.path.join(path, "parameters.yaml")
+
+    scores_save(scoresFile, statsFile)
+    config_save(paramsFile)
+
+
+def HpExecute(repeat=10,
+              all_users=True,
+              postprocessing=False,
+              regenerate=True,
+              mVerbose=False):
+    global scores
+
+    positions = ['Hand', 'Torso', 'Bag', 'Hips']
+    for position in positions:
+        scores = pd.DataFrame()
+        config_edit('train_args', 'train_position', position)
+        config_edit('train_args', 'test_position', position)
+        hparams = 'position-' + str(position)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose)
 
 
 def main():
-    repeat = 10
-    evaluation = False
-    regenerate = False
-    all_users = True
-    logger = False
-    postprocessing = True
-    mVerbose = False
-
     try:
-        execute(repeat = repeat,
-                evaluation = evaluation,
-                regenerate = regenerate,
-                all_users = all_users,
-                logger = logger,
-                postprocessing = postprocessing,
-                mVerbose = mVerbose)
+        HpExecute(repeat=3,
+                  all_users=True,
+                  postprocessing=False,
+                  regenerate=False,
+                  mVerbose=False)
     finally:
         save()
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-

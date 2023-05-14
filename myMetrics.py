@@ -128,7 +128,10 @@ class valTables(Callback):
         self.file_writer = file_writer
         self.weights_file_writer = weights_file_writer
         self.weights_pos_file_writer = weights_pos_file_writer
-        self.random_position = args.train_args['random_position']
+        self.bagPositions = args.train_args['bag_positions']
+        self.random_position = self.bagPositions != 'same'
+        self.posPerInstance = 4 if self.bagPositions == 'all' else 1
+        self.accBagSize *= self.posPerInstance
 
         if args.data_args['dataset'] == 'CompleteUser1':
             self.pnl = ['Hips']
@@ -485,7 +488,10 @@ class testTables(Callback):
         self.file_writer = file_writer
         self.weights_file_writer = weights_file_writer
         self.weights_pos_file_writer = weights_pos_file_writer
-        self.random_position = args.train_args['random_position']
+        self.bagPositions = args.train_args['bag_positions']
+        self.random_position = self.bagPositions != 'same'
+        self.posPerInstance = 4 if self.bagPositions == 'all' else 1
+        self.accBagSize *= self.posPerInstance
 
         if args.data_args['dataset'] == 'CompleteUser1':
             self.pnl = ['Hips']
@@ -1120,7 +1126,10 @@ class accValTables(keras.callbacks.Callback):
         self.steps = steps
         self.accBagSize = args.train_args['accBagSize']
         self.MIL = args.train_args['separate_MIL']
-        self.random_position = args.train_args['random_position']
+        self.bagPositions = args.train_args['bag_positions']
+        self.random_position = self.bagPositions != 'same'
+        self.posPerInstance = 4 if self.bagPositions == 'all' else 1
+        self.accBagSize *= self.posPerInstance
 
         self.class_names = [
             'Still',
@@ -1275,7 +1284,10 @@ class accTestTables(keras.callbacks.Callback):
         self.steps = steps
         self.accBagSize = args.train_args['accBagSize']
         self.MIL = args.train_args['separate_MIL']
-        self.random_position = args.train_args['random_position']
+        self.bagPositions = args.train_args['bag_positions']
+        self.random_position = self.bagPositions != 'same'
+        self.posPerInstance = 4 if self.bagPositions == 'all' else 1
+        self.accBagSize *= self.posPerInstance
 
         self.class_names = [
             'Still',

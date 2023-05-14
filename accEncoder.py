@@ -98,7 +98,7 @@ def getAccEncoder(input_shapes, args, L):
     if shape == '1D':
         paddingLayer = ZeroPadding1D(padding=1)  # same padding
         conv1D = Conv1D(
-            filters=16,
+            filters=64,
             kernel_size=3,
             strides=1,
             padding='valid',
@@ -117,7 +117,7 @@ def getAccEncoder(input_shapes, args, L):
 
         paddingLayer = ZeroPadding1D(padding=1)  # same padding
         conv1D = Conv1D(
-            filters=32,
+            filters=64,
             kernel_size=3,
             strides=1,
             padding='valid',
@@ -390,11 +390,11 @@ def fit(data: Dataset,
     test_metrics = accTestMetrics(test, data.testBatchSize, test_steps)
 
     test_tables = accTestTables(data.shl_args,
-                            test,
-                            data.testBatchSize,
-                            test_steps,
-                            file_writer_test,
-                            w_file_writer_test)
+                                test,
+                                data.testBatchSize,
+                                test_steps,
+                                file_writer_test,
+                                w_file_writer_test)
 
     if mVerbose:
         callbacks = [test_metrics, test_tables]

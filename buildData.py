@@ -180,7 +180,7 @@ class buildData:
                     )
 
                     if self.verbose:
-                        print('NaN GPSs: ' + len(nans))
+                        print('NaN GPSs: ' + str(len(nans)))
                         print(tmp_dst_loc)
 
                     tmp_mmap_loc = np.memmap(

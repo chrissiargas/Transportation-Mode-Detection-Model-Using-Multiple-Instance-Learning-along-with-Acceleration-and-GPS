@@ -4,7 +4,7 @@ data_args:
   accDuration: 1200
   accStride: 1200
 
-  locDuration: 12   #samples
+  locDuration: 12    #samples
   locStride: 1 #samples
 
   path: /home/chris/SHL
@@ -43,7 +43,7 @@ train_args:
   - Jerk
 
   use_spectrograms: true
-  freq_interpolation: linear # linear, log
+  freq_interpolation: log # linear, log
   specto_window: 10  #seconds
   specto_overlap: 9.5 #seconds
   specto_augment: [frequencyMask, timeMask]  #[timeWarp, frequencyMask, timeMask, randomMask]
@@ -74,7 +74,7 @@ train_args:
   test_user: 2
 
   val_percentage: 0.15          # used if stratify == concentrated
-  randomize: true
+  randomize: false
 
   separate_MIL: false
 
@@ -84,7 +84,7 @@ train_args:
   accEpochs: 160
   locEpochs: 200
 
-  transfer_learning_acc: train #[train, load, none]
+  transfer_learning_acc: train  #[train, load, none]
   transfer_learning_loc: none   #[train, load, none]
 
   transition_threshold: 120
@@ -92,8 +92,12 @@ train_args:
   verbose: 1
   heads: 1
 
-  random_position: false
-
+  bag_positions: same # same, random, variable
+  train_position: Hand  # Hand, Torso, Bag, Hips, all
+  test_position: Hand  # Hand, Torso, Bag, Hips, all
+  multiple_test: true
+  multiple_val: true
+  multiple_train: true
 
 
 
