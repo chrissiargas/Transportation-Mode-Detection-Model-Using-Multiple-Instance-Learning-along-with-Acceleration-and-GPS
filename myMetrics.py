@@ -30,7 +30,7 @@ class valMetrics(Callback):
         self.score = 'macro'
         self.verbose = verbose
 
-    def on_epoch_end(self, epoch, logs=None):
+    def on_epoch_end(self, epoch, logs={}):
         total = self.batchSize * self.steps
         step = 0
         val_predict = np.zeros(total)
@@ -67,7 +67,7 @@ class testMetrics(Callback):
         self.score = 'macro'
         self.verbose = verbose
 
-    def on_test_end(self, logs=None):
+    def on_test_end(self, logs={}):
         total = self.batchSize * self.steps
         step = 0
         test_predict = np.zeros(total)
@@ -114,21 +114,34 @@ class valTables(Callback):
         self.accMIL = args.train_args['separate_MIL']
         self.n_heads = args.train_args['heads']
 
-        self.class_names = [
-            'Still',
-            'Walking',
-            'Run',
-            'Bike',
-            'Car',
-            'Bus',
-            'Train',
-            'Subway'
-        ]
+        self.motorized = args.train_args['motorized']
+        self.n_classes = 5 if self.motorized else 8
+
+        if self.motorized:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Motorized'
+            ]
+
+        else:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Car',
+                'Bus',
+                'Train',
+                'Subway'
+            ]
 
         self.file_writer = file_writer
         self.weights_file_writer = weights_file_writer
         self.weights_pos_file_writer = weights_pos_file_writer
-        self.bagPositions = args.train_args['bag_positions']
+        self.bagPositions = args.train_args['train_bag_positions']
         self.random_position = self.bagPositions != 'same'
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
         self.accBagSize *= self.posPerInstance
@@ -474,21 +487,34 @@ class testTables(Callback):
         self.accMIL = args.train_args['separate_MIL']
         self.n_heads = args.train_args['heads']
 
-        self.class_names = [
-            'Still',
-            'Walking',
-            'Run',
-            'Bike',
-            'Car',
-            'Bus',
-            'Train',
-            'Subway'
-        ]
+        self.motorized = args.train_args['motorized']
+        self.n_classes = 5 if self.motorized else 8
+
+        if self.motorized:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Motorized'
+            ]
+
+        else:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Car',
+                'Bus',
+                'Train',
+                'Subway'
+            ]
 
         self.file_writer = file_writer
         self.weights_file_writer = weights_file_writer
         self.weights_pos_file_writer = weights_pos_file_writer
-        self.bagPositions = args.train_args['bag_positions']
+        self.bagPositions = args.train_args['test_bag_positions']
         self.random_position = self.bagPositions != 'same'
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
         self.accBagSize *= self.posPerInstance
@@ -895,23 +921,36 @@ class gpsTestMetrics(keras.callbacks.Callback):
 
 
 class gpsValTables(keras.callbacks.Callback):
-    def __init__(self, val, batchSize, steps, file_writer):
+    def __init__(self, val, batchSize, steps, file_writer, motorized=False):
 
         super(gpsValTables, self).__init__()
         self.val = val
         self.batchSize = batchSize
         self.steps = steps
 
-        self.class_names = [
-            'Still',
-            'Walking',
-            'Run',
-            'Bike',
-            'Car',
-            'Bus',
-            'Train',
-            'Subway'
-        ]
+        self.motorized = motorized
+        self.n_classes = 5 if self.motorized else 8
+
+        if self.motorized:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Motorized'
+            ]
+
+        else:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Car',
+                'Bus',
+                'Train',
+                'Subway'
+            ]
 
         self.file_writer = file_writer
 
@@ -967,23 +1006,37 @@ class gpsTestTables(keras.callbacks.Callback):
                  test,
                  batchSize,
                  steps,
-                 file_writer):
+                 file_writer,
+                 motorized=False):
 
         super(gpsTestTables, self).__init__()
         self.test = test
         self.batchSize = batchSize
         self.steps = steps
 
-        self.class_names = [
-            'Still',
-            'Walking',
-            'Run',
-            'Bike',
-            'Car',
-            'Bus',
-            'Train',
-            'Subway'
-        ]
+        self.motorized = motorized
+        self.n_classes = 5 if self.motorized else 8
+
+        if self.motorized:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Motorized'
+            ]
+
+        else:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Car',
+                'Bus',
+                'Train',
+                'Subway'
+            ]
 
         self.file_writer = file_writer
 
@@ -1060,7 +1113,7 @@ class accValMetrics(keras.callbacks.Callback):
 
         f1 = f1_score(val_true, val_predict, average=self.score)
         recall = recall_score(val_true, val_predict, average=self.score)
-        precision =precision_score(val_true, val_predict, average=self.score)
+        precision = precision_score(val_true, val_predict, average=self.score)
 
         del val_predict
         del val_true
@@ -1126,21 +1179,33 @@ class accValTables(keras.callbacks.Callback):
         self.steps = steps
         self.accBagSize = args.train_args['accBagSize']
         self.MIL = args.train_args['separate_MIL']
-        self.bagPositions = args.train_args['bag_positions']
+        self.bagPositions = args.train_args['train_bag_positions']
         self.random_position = self.bagPositions != 'same'
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
         self.accBagSize *= self.posPerInstance
+        self.motorized = args.train_args['motorized']
+        self.n_classes = 5 if self.motorized else 8
 
-        self.class_names = [
-            'Still',
-            'Walking',
-            'Run',
-            'Bike',
-            'Car',
-            'Bus',
-            'Train',
-            'Subway'
-        ]
+        if self.motorized:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Motorized'
+            ]
+
+        else:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Car',
+                'Bus',
+                'Train',
+                'Subway'
+            ]
 
         self.file_writer = file_writer
         self.weights_file_writer = weights_file_writer
@@ -1284,21 +1349,34 @@ class accTestTables(keras.callbacks.Callback):
         self.steps = steps
         self.accBagSize = args.train_args['accBagSize']
         self.MIL = args.train_args['separate_MIL']
-        self.bagPositions = args.train_args['bag_positions']
+        self.bagPositions = args.train_args['test_bag_positions']
         self.random_position = self.bagPositions != 'same'
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
         self.accBagSize *= self.posPerInstance
 
-        self.class_names = [
-            'Still',
-            'Walking',
-            'Run',
-            'Bike',
-            'Car',
-            'Bus',
-            'Train',
-            'Subway'
-        ]
+        self.motorized = args.train_args['motorized']
+        self.n_classes = 5 if self.motorized else 8
+
+        if self.motorized:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Motorized'
+            ]
+
+        else:
+            self.class_names = [
+                'Still',
+                'Walking',
+                'Run',
+                'Bike',
+                'Car',
+                'Bus',
+                'Train',
+                'Subway'
+            ]
 
         self.file_writer = file_writer
         self.weights_file_writer = weights_file_writer

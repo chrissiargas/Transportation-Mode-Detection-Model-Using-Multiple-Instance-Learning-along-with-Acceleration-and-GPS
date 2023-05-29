@@ -10,13 +10,17 @@ from keras.optimizers import Adam
 from keras.losses import CategoricalCrossentropy
 from keras.metrics import categorical_accuracy
 from hmmlearn.hmm import MultinomialHMM
-from sklearn.metrics import f1_score, accuracy_score
+from sklearn.metrics import f1_score, accuracy_score, confusion_matrix
+import numpy as np
+import pandas as pd
 
 
-def evaluate(data: Dataset, verbose=0, postprocessing = True):
+def evaluate(data: Dataset, verbose=0, postprocessing=True):
+
     L = 256
     D = 128
 
+    data.initialize()
     if data.gpsMode in ['load', 'train']:
 
         data(gpsTransfer=True)
@@ -125,7 +129,7 @@ def evaluate(data: Dataset, verbose=0, postprocessing = True):
 
     Model.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    y_, y, lengths = data.yToSequence(Model=Model)
+    y_, y, lengths, transition = data.yToSequence(Model=Model, get_transition=True)
 
     accuracy = accuracy_score(y, y_)
     f1 = f1_score(y, y_, average='macro')
@@ -137,21 +141,22 @@ def evaluate(data: Dataset, verbose=0, postprocessing = True):
     postF1 = None
 
     if postprocessing:
+        n_classes = 5 if data.motorized else 8
+
         params = hmmParams()
-        confusion, transition = params(data.complete, data.testUser)
+        confusion = params(data.complete, data.motorized)
 
-        startprob = [1. / 8 for _ in range(8)]
+        discrete_model = MultinomialHMM(n_components=n_classes,
+                                        algorithm='viterbi',
+                                        n_iter=300,
+                                        init_params='')
 
-        HMM = MultinomialHMM(n_components=8,
-                             algorithm='viterbi',
-                             random_state=93,
-                             n_iter=100)
+        discrete_model.n_features = n_classes
+        discrete_model.startprob_ = [1. / n_classes for _ in range(n_classes)]
+        discrete_model.transmat_ = transition
+        discrete_model.emissionprob_ = confusion
 
-        HMM.startprob_ = startprob
-        HMM.transmat_ = transition
-        HMM.emissionprob_ = confusion
-
-        postY_ = HMM.predict(y_, lengths)
+        postY_ = discrete_model.predict(y_, lengths)
         postAccuracy = accuracy_score(y, postY_)
         postF1 = f1_score(y, postY_, average='macro')
 

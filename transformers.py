@@ -7,16 +7,18 @@ from mySpectrogram import LogBands, my_tvs, my_tvs2
 
 
 class CategoricalTransformer:
-    def __init__(self):
-        self.encoding = np.zeros((8, 8), dtype=np.float32)
-        for i in range(8):
+    def __init__(self, motorized = False):
+        self.motorized = motorized
+        self.n_classes = 5 if motorized else 8
+        self.encoding = np.zeros((self.n_classes, self.n_classes), dtype=np.float32)
+        for i in range(self.n_classes):
             self.encoding[i, i] = 1.
 
     def __call__(self, label, timeInfo=False):
         if timeInfo:
-            return self.encoding[label[0] - 1], label[-3:]
+            return self.encoding[min(label[0] - 1, self.n_classes - 1)], label[-3:]
         else:
-            return self.encoding[label[0] - 1], None
+            return self.encoding[min(label[0] - 1, self.n_classes - 1)], None
 
 
 class temporalTransformer:
@@ -37,7 +39,7 @@ class temporalTransformer:
         self.channels = len(shl_args.train_args['acc_signals'])
         self.bagSize = shl_args.train_args['accBagSize']
         self.syncing = shl_args.train_args['sync']
-        self.bagPositions = shl_args.train_args['bag_positions']
+        self.bagPositions = shl_args.train_args['train_bag_positions']
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
 
         self.rawSignals = {
@@ -219,7 +221,7 @@ class spectrogramTransformer:
         self.syncing = shl_args.train_args['sync']
         self.log = shl_args.train_args['freq_interpolation'] == 'log'
         self.mySpectro = False
-        self.bagPositions = shl_args.train_args['bag_positions']
+        self.bagPositions = shl_args.train_args['train_bag_positions']
         self.bagSize = shl_args.train_args['accBagSize']
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
 

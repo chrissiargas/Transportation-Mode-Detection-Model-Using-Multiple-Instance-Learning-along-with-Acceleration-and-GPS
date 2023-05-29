@@ -217,13 +217,13 @@ def getMIL(args, L, D):
                  name='AccelerationMIL')
 
 
-def getClassifier(L):
+def getClassifier(L, n_units=8):
     pooling = keras.Input(shape=L)
     kernelInitializer = initializers.glorot_uniform()
 
     X = pooling
 
-    finalLayer = Dense(units=8, activation='softmax', kernel_initializer=kernelInitializer)
+    finalLayer = Dense(units=n_units, activation='softmax', kernel_initializer=kernelInitializer)
 
     yPred = finalLayer(X)
 
@@ -233,10 +233,12 @@ def getClassifier(L):
 def build(input_shapes, args, L=32, D=12):
     batchSize = args.train_args['trainBatchSize']
     useMIL = args.train_args['separate_MIL']
+    motorized = args.train_args['motorized']
+    n_classes = 5 if motorized else 8
     accShape = input_shapes[0]
     posShape = input_shapes[1]
     accNetwork = getAccEncoder(accShape, args, L)
-    classifier = getClassifier(L)
+    classifier = getClassifier(L, n_units=n_classes)
     accBag = Input(accShape)
     accPos = Input(posShape, name='positional')
     accMIL = None
@@ -310,13 +312,18 @@ def fit(data: Dataset,
     model_name = 'TMD_%s_model.h5' % model_type
     filepath = os.path.join(save_dir, model_name)
 
+    try:
+        os.remove(filepath)
+    except OSError as e:
+        print("Error: %s - %s." % (e.filename, e.strerror))
+
     val_steps = data.valSize // data.valBatchSize
     train_steps = data.trainSize // data.trainBatchSize
     test_steps = data.testSize // data.testBatchSize
 
     accNetwork = build(input_shapes=data.inputShape, args=data.shl_args, L=L, D=D)
 
-    optimizer = Adam(learning_rate=data.lr)
+    optimizer = Adam(learning_rate=float(data.lr))
 
     loss_function = CategoricalCrossentropy()
 
@@ -329,11 +336,11 @@ def fit(data: Dataset,
     val_metrics = accValMetrics(val, data.valBatchSize, val_steps, verbose)
 
     val_tables = accValTables(data.shl_args,
-                          val,
-                          data.valBatchSize,
-                          val_steps,
-                          file_writer_val,
-                          w_file_writer_val)
+                              val,
+                              data.valBatchSize,
+                              val_steps,
+                              file_writer_val,
+                              w_file_writer_val)
 
     save_model = ModelCheckpoint(
         filepath=filepath,

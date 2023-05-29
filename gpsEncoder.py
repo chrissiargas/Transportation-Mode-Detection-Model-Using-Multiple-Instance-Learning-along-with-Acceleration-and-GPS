@@ -88,13 +88,13 @@ def getGpsEncoder(input_shapes, args, L):
                  name='gpsEncoder')
 
 
-def getClassifier(L):
+def getClassifier(L, n_units=8):
     pooling = keras.Input(shape=L)
     kernel_initializer = initializers.glorot_uniform()
 
     X = pooling
 
-    finalLayer = Dense(units=8,
+    finalLayer = Dense(units=n_units,
                        activation='softmax',
                        kernel_initializer=kernel_initializer)
 
@@ -106,11 +106,14 @@ def getClassifier(L):
 
 
 def build(input_shapes, args, L=256):
+    motorized = args.train_args['motorized']
+    n_classes = 5 if motorized else 8
+
     shape = input_shapes
 
     gpsNetwork = getGpsEncoder(shape, args, L)
 
-    classifier = getClassifier(L)
+    classifier = getClassifier(L, n_units=n_classes)
 
     gpsSeries = Input(shape[0])
     gpsFeatures = Input(shape[1])

@@ -6,6 +6,7 @@ from extractData import extractData
 from buildData import buildData
 from transformers import *
 from features import *
+import os
 
 np.set_printoptions(precision=14)
 
@@ -65,6 +66,8 @@ class Dataset:
 
             del xData
 
+    def initialize(self):
+
         self.complete = (self.shl_args.data_args['dataset'] == 'CompleteUser1')
 
         if self.complete:
@@ -104,9 +107,9 @@ class Dataset:
 
         self.testUser = self.shl_args.train_args['test_user']
         self.bags = self.labels.shape[0]
-        self.n_labels = 8
         self.accBagSize = self.shl_args.train_args['accBagSize']
-        self.bagPositions = self.shl_args.train_args['bag_positions']
+        self.trainBagPositions = self.shl_args.train_args['train_bag_positions']
+        self.testBagPositions = self.shl_args.train_args['test_bag_positions']
         self.trainBatchSize = self.shl_args.train_args['trainBatchSize']
         self.valBatchSize = self.shl_args.train_args['valBatchSize']
         self.testBatchSize = self.shl_args.train_args['testBatchSize']
@@ -125,7 +128,8 @@ class Dataset:
         self.useSpectro = self.shl_args.train_args['use_spectrograms']
         self.trainPosition = self.shl_args.train_args['train_position']
         self.testPosition = self.shl_args.train_args['test_position']
-        self.posPerInstance = 4 if self.bagPositions == 'all' else 1
+        self.trainPerInstance = 4 if self.trainBagPositions == 'all' else 1
+        self.testPerInstance = 4 if self.testBagPositions == 'all' else 1
         self.multipleTrain = self.shl_args.train_args['multiple_train']
         self.multipleVal = self.shl_args.train_args['multiple_val']
         self.multipleTest = self.shl_args.train_args['multiple_test']
@@ -155,48 +159,39 @@ class Dataset:
         self.accBags = None
         self.lbsBags = None
         self.gpsBags = None
+        self.motorized = self.shl_args.train_args['motorized']
+        self.n_classes = 5 if self.motorized else 8
 
-    def to_pandas(self, indices, motorized_class=True):
+    def to_pandas(self, indices, motorized=True):
         data = []
+
         for en, index in enumerate(indices):
 
             i = index[0]
+            position = index[1][0][0]
 
-            position = self.positions[index[1][0]]
+            location = self.location[self.positions.index(self.whichGPS)][self.gpsBags[self.whichGPS][i]]
+            vel = gps_features(location, self.gpsDuration)
 
-            locBag = []
-            for pos_i, pos in enumerate(self.positions):
-                locBag.append(self.location[pos_i][self.gpsBags[pos][i]])
-
-            LocFeature, LocTime, Accuracy, Lat, Lon = gps_features(locBag,
-                                                                   duration=self.gpsDuration,
-                                                                   positions=self.positionsDict,
-                                                                   whichGPS=self.whichGPS)
-
-            if LocFeature == -1:
+            if vel == -1:
                 continue
 
-            del locBag
-
-            AccFeatures = acc_features(self.acceleration[self.accBags[i]],
-                                       position=position,
-                                       positions=self.positionsDict)
+            var, coef1Hz, coef2Hz, coef3Hz = acc_features(self.acceleration[self.accBags[i]], position=position)
 
             Lb = self.labels[self.lbsBags[i]][0] - 1
-            if motorized_class:
+            if motorized:
                 Lb = Lb if Lb < 4 else 4
 
-            Time = self.labels[self.lbsBags[i]][-1]
+            user, day, time = self.labels[self.lbsBags[i]][-3:]
 
             if en == 0:
-                data = [[LocFeature, Accuracy, Lat, Lon, *AccFeatures, LocTime, Time, position, Lb]]
+                data = [[vel, var, coef1Hz, coef2Hz, coef3Hz, user, day, time, position, Lb]]
 
             else:
-                data.append([LocFeature, Accuracy, Lat, Lon, *AccFeatures, LocTime, Time, position, Lb])
+                data.append([vel, var, coef1Hz, coef2Hz, coef3Hz, user, day, time, position, Lb])
 
         data = pd.DataFrame(data,
-                            columns=['vel', 'acc', 'lat', 'lon', 'var', '1Hz', '2Hz', '3Hz', 'User', 'Day', 'GPS Time',
-                                     'Label Time', 'Position', 'Label'])
+                            columns=['vel', 'var', '1Hz', '2Hz', '3Hz', 'User', 'Day', 'Time', 'Position', 'Label'])
 
         return data
 
@@ -335,7 +330,7 @@ class Dataset:
             self.gpsWindowShape, self.gpsFeaturesShape = self.gpsTfrm.get_shape
             self.gpsTimeShape = self.gpsTfrm.get_time_shape()
 
-        self.lbsTfrm = CategoricalTransformer()
+        self.lbsTfrm = CategoricalTransformer(motorized=self.motorized)
 
         if gpsTransfer:
             self.inputShape = (self.gpsWindowShape, self.gpsFeaturesShape)
@@ -345,14 +340,15 @@ class Dataset:
                 self.timeType = (tf.float64, tf.float64)
 
         elif accTransfer:
-            self.inputShape = (self.accShape, self.accBagSize * self.posPerInstance)
+            self.inputShape = (self.accShape, self.accBagSize * self.trainPerInstance)
             self.inputType = (tf.float64, tf.int32)
             if timeInfo:
                 self.timeShape = (self.accTimeShape, 3)
                 self.timeType = (tf.float64, tf.float64)
 
         else:
-            self.inputShape = (self.accShape, self.gpsWindowShape, self.gpsFeaturesShape, self.accBagSize * self.posPerInstance)
+            self.inputShape = (
+            self.accShape, self.gpsWindowShape, self.gpsFeaturesShape, self.accBagSize * self.trainPerInstance)
             self.inputType = (tf.float64, tf.float64, tf.float64, tf.int32)
             if timeInfo:
                 self.timeShape = (self.accTimeShape, self.gpsTimeShape, 3)
@@ -395,7 +391,7 @@ class Dataset:
                 if not accTransfer:
                     location = self.location[self.positions.index(self.whichGPS)][self.gpsBags[self.whichGPS][bagIndex]]
                     gpsSeries, gpsFeatures, gpsTime = self.gpsTfrm(location, timeInfo=timeInfo,
-                                                                   is_train = not (is_val or is_test))
+                                                                   is_train=not (is_val or is_test))
 
                 y, yTime = self.lbsTfrm(self.labels[self.lbsBags[bagIndex]], timeInfo=timeInfo)
 
@@ -426,7 +422,7 @@ class Dataset:
                               tf.float32,
                               self.timeType),
                 output_shapes=(self.inputShape,
-                               self.n_labels,
+                               self.n_classes,
                                self.timeShape))
 
         else:
@@ -435,17 +431,13 @@ class Dataset:
                 output_types=(self.inputType,
                               tf.float32),
                 output_shapes=(self.inputShape,
-                               self.n_labels))
+                               self.n_classes))
 
     def batch_and_prefetch(self, train, val, test):
 
-        return train.cache().shuffle(1000).repeat() \
-            .batch(batch_size=self.trainBatchSize) \
-            .prefetch(tf.data.AUTOTUNE), \
-            val.cache().shuffle(1000).repeat() \
-                .batch(batch_size=self.valBatchSize).prefetch(tf.data.AUTOTUNE), \
-            test.cache().shuffle(1000).repeat() \
-                .batch(batch_size=self.testBatchSize).prefetch(tf.data.AUTOTUNE)
+        return train.cache().shuffle(1000).repeat().batch(batch_size=self.trainBatchSize).prefetch(tf.data.AUTOTUNE), \
+               val.cache().shuffle(1000).repeat().batch(batch_size=self.valBatchSize).prefetch(tf.data.AUTOTUNE), \
+               test.cache().shuffle(1000).repeat().batch(batch_size=self.testBatchSize).prefetch(tf.data.AUTOTUNE)
 
     def split_train_val(self, dataIndices):
 
@@ -555,13 +547,15 @@ class Dataset:
 
             self.split_train_val(train_val_indices)
 
-    def yToSequence(self, Model, verbose = False):
+    def yToSequence(self, Model, verbose=False, get_transition=False):
 
         predicted = []
         true = []
         true_sequence = []
         lengths = []
         length = 0
+        transition_mx = pd.DataFrame()
+        classes = [i for i in range(self.n_classes)]
 
         if self.testPosition != 'all':
             nSeqs = 1
@@ -588,7 +582,7 @@ class Dataset:
                     else:
                         seqPos[0].append([pos])
 
-                elif self.bagPositions == 'same':
+                elif self.testBagPositions == 'same':
                     if not len(seqPos[0]):
                         seqPos = [[[s] for _ in range(self.accBagSize)] for s in range(nSeqs)]
 
@@ -596,7 +590,7 @@ class Dataset:
                         for s in range(nSeqs):
                             seqPos[s].append([s])
 
-                elif self.bagPositions == 'random':
+                elif self.testBagPositions == 'random':
                     if not len(seqPos[0]):
                         seqPos = [random.sample(range(nSeqs), nSeqs) for _ in range(self.accBagSize)]
                         seqPos = list(map(list, zip(*seqPos)))
@@ -607,7 +601,7 @@ class Dataset:
                         for s in range(nSeqs):
                             seqPos[s].append([pos[s]])
 
-                elif self.bagPositions == 'variable':
+                elif self.testBagPositions == 'variable':
                     probability = 0.3
 
                     if not len(seqPos[0]):
@@ -663,7 +657,7 @@ class Dataset:
 
                     if s == 0:
                         length += 1
-                        true_sequence.append(label - 1)
+                        true_sequence.append(min(label - 1, self.n_classes - 1))
 
                     inputs[s][0].append(accBag)
                     inputs[s][1].append(gpsSeries)
@@ -678,18 +672,33 @@ class Dataset:
                         self.labels[index + 1][-2] != day or \
                         self.labels[index + 1][-3] != user:
 
+                    if get_transition:
+                        seq = pd.DataFrame(true_sequence, columns=['Label'])
+                        seq_ = seq
+                        seq_['label_'] = seq_.shift(-1)
+
+                        groups = seq_.groupby(['Label', 'label_'])
+
+                        counts = {g[0]: len(g[1]) for g in groups}
+
+                        matrix = pd.DataFrame()
+
+                        for x in classes:
+                            matrix[x] = pd.Series([counts.get((x, y), 0) for y in classes], index=classes)
+
+                        if transition_mx.empty:
+                            transition_mx = matrix
+                        else:
+                            transition_mx = transition_mx.add(matrix)
+
                     for s in range(nSeqs):
                         true.extend(true_sequence)
-                        predicted.extend(np.argmax(Model.predict([np.array(inputs[s][i]) for i in range(4)], verbose=0), axis=1))
+                        predicted.extend(
+                            np.argmax(Model.predict([np.array(inputs[s][i]) for i in range(4)], verbose=0), axis=1))
                         lengths.append(length)
 
-                    if self.testPosition != 'all':
-                        seqPos = [[]]
-                        inputs = [[[] for _ in range(4)]]
-                    else:
-                        seqPos = [[] for _ in range(nSeqs)]
-                        inputs = [[[] for _ in range(4)] for _ in range(nSeqs)]
-
+                    seqPos = [[] for _ in range(nSeqs)]
+                    inputs = [[[] for _ in range(4)] for _ in range(nSeqs)]
                     true_sequence = []
                     length = 0
 
@@ -697,17 +706,23 @@ class Dataset:
         predicted = np.reshape(predicted, (-1, 1))
         true = np.array(true)
 
+        if get_transition:
+            transition_mx["sum"] = transition_mx.sum(axis=1)
+            transition_mx = transition_mx.div(transition_mx["sum"], axis=0)
+            transition_mx = transition_mx.drop(columns=['sum'])
+            transition_mx = transition_mx.values.tolist()
+
         if verbose:
             offset = 0
             for length in lengths:
                 print(length)
-                print(true[offset : offset + length])
-                print(predicted[offset : offset + length,0])
+                print(true[offset: offset + length])
+                print(predicted[offset: offset + length, 0])
                 offset += length
 
-        return predicted, true, lengths
+        return predicted, true, lengths, transition_mx
 
-    def same_position(self, indices, multiple = True, pos = None):
+    def same_position(self, indices, multiple=True, pos=None):
         n = self.shl_args.train_args['accBagSize']
         positions = len(self.positions)
         posIndices = []
@@ -722,7 +737,7 @@ class Dataset:
                 posIndices.extend([[index, [[pos] for _ in range(n)]] for pos in range(positions)])
 
         else:
-            if pos:
+            if pos is not None:
                 for index in indices:
 
                     if not len(posIndices):
@@ -743,7 +758,7 @@ class Dataset:
 
         return posIndices
 
-    def random_position(self, indices, multiple = True):
+    def random_position(self, indices, multiple=True):
         n = self.shl_args.train_args['accBagSize']
         positions = len(self.positions)
         posIndices = []
@@ -772,7 +787,7 @@ class Dataset:
 
         return posIndices
 
-    def variable_position(self, indices, multiple = True):
+    def variable_position(self, indices, multiple=True):
         n = self.shl_args.train_args['accBagSize']
         positions = len(self.positions)
         posIndices = []
@@ -845,20 +860,20 @@ class Dataset:
 
         return posIndices
 
-    def assign_position(self, accTransfer=False, randomTree=False):
+    def assign_position(self, accTransfer=False, decisionTree=False):
 
         if self.testPosition != 'all':
             pos = self.positionsDict[self.testPosition]
-            self.test_indices = self.same_position(self.test_indices, multiple = False, pos = pos)
+            self.test_indices = self.same_position(self.test_indices, multiple=False, pos=pos)
 
         else:
-            if self.bagPositions == 'same':
+            if self.testBagPositions == 'same':
                 self.test_indices = self.same_position(self.test_indices, multiple=self.multipleTest)
 
-            elif self.bagPositions == 'random':
+            elif self.testBagPositions == 'random':
                 self.test_indices = self.random_position(self.test_indices, multiple=self.multipleTest)
 
-            elif self.bagPositions == 'variable':
+            elif self.testBagPositions == 'variable':
                 self.test_indices = self.variable_position(self.test_indices, multiple=self.multipleTest)
 
         if self.trainPosition != 'all':
@@ -867,28 +882,28 @@ class Dataset:
             self.train_indices = self.same_position(self.train_indices, multiple=False, pos=pos)
 
         else:
-            if self.bagPositions == 'same':
+            if self.trainBagPositions == 'same':
                 self.val_indices = self.same_position(self.val_indices, multiple=self.multipleVal)
 
-                if accTransfer or randomTree:
+                if accTransfer or decisionTree:
                     self.train_indices = self.same_position(self.train_indices, multiple=self.multipleTrain)
 
                 else:
                     self.train_indices = self.same_position(self.train_indices, multiple=False)
 
-            elif self.bagPositions == 'random':
+            elif self.trainBagPositions == 'random':
                 self.val_indices = self.random_position(self.val_indices, multiple=self.multipleVal)
 
-                if accTransfer or randomTree:
+                if accTransfer or decisionTree:
                     self.train_indices = self.random_position(self.train_indices, multiple=self.multipleTrain)
 
                 else:
                     self.train_indices = self.random_position(self.train_indices, multiple=False)
 
-            elif self.bagPositions == 'variable':
+            elif self.trainBagPositions == 'variable':
                 self.val_indices = self.variable_position(self.val_indices, multiple=self.multipleVal)
 
-                if accTransfer or randomTree:
+                if accTransfer or decisionTree:
                     self.train_indices = self.variable_position(self.train_indices, multiple=self.multipleTrain)
 
                 else:
@@ -898,7 +913,7 @@ class Dataset:
         self.valSize = len(self.val_indices)
         self.trainSize = len(self.train_indices)
 
-        if not randomTree and self.random:
+        if self.random:
             random.shuffle(self.test_indices)
             random.shuffle(self.val_indices)
             random.shuffle(self.train_indices)
@@ -920,69 +935,79 @@ class Dataset:
         self.valSize = len(self.val_indices)
         self.trainSize = len(self.train_indices)
 
+    def toCSVs(self, filepath, motorized):
+
+        self.to_bags()
+        self.split()
+        self.assign_position(decisionTree=True)
+
+        train = self.to_pandas(self.train_indices, motorized=motorized)
+        test = self.to_pandas(self.test_indices, motorized=motorized)
+        val = self.to_pandas(self.val_indices, motorized=motorized)
+
+        train_val = pd.concat([train, val], ignore_index=False)
+        train_val['in'] = train_val.index
+        train_val.sort_values(['User', 'Day', 'Time', 'in'], inplace=True, ignore_index=True)
+
+        try:
+            os.makedirs(filepath)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
+
+        train_path = os.path.join(filepath, 'train' + str(self.testUser) + '.csv')
+        val_path = os.path.join(filepath, 'val' + str(self.testUser) + '.csv')
+        test_path = os.path.join(filepath, 'test' + str(self.testUser) + '.csv')
+        train_val_path = os.path.join(filepath, 'train_val' + str(self.testUser) + '.csv')
+
+        train.to_csv(train_path, index=False)
+        val.to_csv(val_path, index=False)
+        test.to_csv(test_path, index=False)
+        train_val.to_csv(train_val_path, index=False)
+
+        return train, val, test, train_val
+
     def __call__(self, accTransfer=False,
                  gpsTransfer=False,
-                 randomTree=False,
                  timeInfo=False,
                  batch_prefetch=True,
                  seed=1):
 
-        if randomTree:
-            motorized = True
-            self.to_bags()
-            self.split()
-            self.assign_position(randomTree=True)
+        self.initialize()
 
-            train = self.to_pandas(self.train_indices, motorized_class=motorized)
-            test = self.to_pandas(self.test_indices, motorized_class=motorized)
-            val = self.to_pandas(self.val_indices, motorized_class=motorized)
+        self.init_transformers(
+            accTransfer=accTransfer,
+            gpsTransfer=gpsTransfer,
+            timeInfo=timeInfo)
 
-            train_path = 'train' + str(self.testUser) + '.csv'
-            val_path = 'val' + str(self.testUser) + '.csv'
-            test_path = 'test' + str(self.testUser) + '.csv'
+        self.to_bags()
+        self.split(seed=seed)
 
-            train.to_csv(train_path, index=False)
-            val.to_csv(val_path, index=False)
-            test.to_csv(test_path, index=False)
+        if gpsTransfer:
+            nulls = self.get_gps_gaps()
+            self.delete_gps_gaps(nulls)
 
+        else:
+            self.assign_position(accTransfer=accTransfer)
+
+        train = self.to_generator(
+            accTransfer=accTransfer,
+            gpsTransfer=gpsTransfer,
+            timeInfo=timeInfo)
+
+        val = self.to_generator(
+            is_val=True,
+            accTransfer=accTransfer,
+            gpsTransfer=gpsTransfer,
+            timeInfo=timeInfo)
+
+        test = self.to_generator(
+            is_test=True,
+            accTransfer=accTransfer,
+            gpsTransfer=gpsTransfer,
+            timeInfo=timeInfo)
+
+        if batch_prefetch:
+            return self.batch_and_prefetch(train, val, test)
+
+        else:
             return train, val, test
-
-        if not randomTree:
-
-            self.init_transformers(
-                accTransfer=accTransfer,
-                gpsTransfer=gpsTransfer,
-                timeInfo=timeInfo)
-
-            self.to_bags()
-            self.split(seed=seed)
-
-            if gpsTransfer:
-                nulls = self.get_gps_gaps()
-                self.delete_gps_gaps(nulls)
-
-            else:
-                self.assign_position(accTransfer=accTransfer)
-
-            train = self.to_generator(
-                accTransfer=accTransfer,
-                gpsTransfer=gpsTransfer,
-                timeInfo=timeInfo)
-
-            val = self.to_generator(
-                is_val=True,
-                accTransfer=accTransfer,
-                gpsTransfer=gpsTransfer,
-                timeInfo=timeInfo)
-
-            test = self.to_generator(
-                is_test=True,
-                accTransfer=accTransfer,
-                gpsTransfer=gpsTransfer,
-                timeInfo=timeInfo)
-
-            if batch_prefetch:
-                return self.batch_and_prefetch(train, val, test)
-
-            else:
-                return train, val, test

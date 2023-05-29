@@ -92,12 +92,15 @@ train_args:
   verbose: 1
   heads: 1
 
-  bag_positions: same # same, random, variable
-  train_position: Hand  # Hand, Torso, Bag, Hips, all
+  train_bag_positions: same # same, random, variable
+  test_bag_positions: same # same, random, variable
+  train_position: all   # Hand, Torso, Bag, Hips, all
   test_position: Hand  # Hand, Torso, Bag, Hips, all
   multiple_test: true
   multiple_val: true
   multiple_train: true
+
+  motorized: false
 
 
 

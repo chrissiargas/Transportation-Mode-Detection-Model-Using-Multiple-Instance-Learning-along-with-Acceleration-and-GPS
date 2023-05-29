@@ -1,13 +1,13 @@
 import numpy as np
 from geopy.distance import great_circle
+from gpsProcessing import get_velocity, get_distance
 
 
-def acc_features(acceleration, position, positions):
+def acc_features(acceleration, position):
 
-    pos_i = 3 * positions[position]
+    pos_i = 3 * position
 
-    magnitude = np.sqrt(np.sum(acceleration[:, :, pos_i:pos_i + 3] ** 2,
-                               axis=2))[0]
+    magnitude = np.sqrt(np.sum(acceleration[:, :, pos_i:pos_i + 3] ** 2, axis=2))[0]
 
     var = np.var(magnitude)
 
@@ -18,54 +18,35 @@ def acc_features(acceleration, position, positions):
     coef2Hz = freq_magnitude[2]
     coef3Hz = freq_magnitude[3]
 
-    acc_features = [var, coef1Hz, coef2Hz, coef3Hz, acceleration[0][0][-3], acceleration[0][0][-2]]
-
-    return acc_features
+    return var, coef1Hz, coef2Hz, coef3Hz
 
 
-def calc_haversine_dis(lat, lon, moment):
-    point1 = (lat[moment - 1], lon[moment - 1])
-    point2 = (lat[moment], lon[moment])
-    return great_circle(point1, point2).m
+def velocity(pos_location, duration):
 
+    time = pos_location[:, -1]
+    lats = pos_location[:, 1]
+    lons = pos_location[:, 2]
 
-def calc_haversine_vel(lat, lon, t, moment):
-    hvs_dis = calc_haversine_dis(lat, lon, moment)
-    return 3600. * hvs_dis / (t[moment] - t[moment - 1])
-
-
-def haversine_velocity(pos_location, duration):
-    time_signal = pos_location[:, -1]
-    x_signal = pos_location[:, 1]
-    y_signal = pos_location[:, 2]
-
-    vel_signal = np.zeros((duration - 1))
+    sequence = np.zeros((duration - 1))
 
     for moment in range(1, duration):
-        vel_signal[moment - 1] = calc_haversine_vel(x_signal,
-                                                     y_signal,
-                                                     time_signal,
-                                                     moment)
+        sequence[moment - 1] = get_velocity(lats, lons, time, moment)
 
-    return vel_signal
+    return sequence
 
 
-def gps_features(location, positions, whichGPS, duration):
+def gps_features(location, duration):
 
-    pos_name = whichGPS
-
-    pos_location = location[positions[pos_name]]
-
-    if np.size(pos_location):
-        pos_location = pos_location[0]
+    if location.shape[0]:
+        location = location[0]
 
     else:
-        return -1, -1, -1, -1, -1
+        return -1
 
-    for location_timestamp in pos_location:
-        if location_timestamp[0] == -1.:
-            return -1, -1, -1, -1, -1
+    for timestamp in location:
+        if timestamp[0] == -1.:
+            return -1
 
-    velocity = haversine_velocity(pos_location, duration)
+    v = velocity(location, duration)
 
-    return velocity[0], pos_location[-1][-1], pos_location[-1][0], pos_location[-1][1], pos_location[-1][2]
+    return v[0]

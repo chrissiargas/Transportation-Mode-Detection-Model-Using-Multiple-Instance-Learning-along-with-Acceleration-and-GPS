@@ -192,6 +192,7 @@ def getAccEncoder(input_shapes, args, L, transfer=False):
 
 def getGpsEncoder(input_shapes, args, L):
     mask = args.train_args['mask']
+
     kernelIntializer = initializers.he_uniform()
 
     gpsSeriesShape = list(input_shapes[1])[1:]
@@ -310,12 +311,12 @@ def getHead(L, head=1):
                  name='head' + str(head))
 
 
-def getClassifier(L):
+def getClassifier(L, n_units=8):
     kernel_initializer = initializers.glorot_uniform()
     head = Input(shape=(L // 2))
     X = head
 
-    finalLayer = Dense(units=8,
+    finalLayer = Dense(units=n_units,
                        activation='softmax',
                        kernel_initializer=kernel_initializer)
 
@@ -329,6 +330,8 @@ def getClassifier(L):
 def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
     n_heads = args.train_args['heads']
     useAccMIL = args.train_args['separate_MIL']
+    motorized = args.train_args['motorized']
+    n_classes = 5 if motorized else 8
     accTransfer = True if accTransferNet else False
     accNetwork = getAccEncoder(input_shapes, args, L, accTransfer)
 
@@ -358,7 +361,7 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
         MILs.append(getMIL(args, L, D, head=head))
         heads.append(getHead(L, head=head))
 
-    classifier = getClassifier(L)
+    classifier = getClassifier(L, n_units=n_classes)
 
     accShape = input_shapes[0]
     accBagSize = list(accShape)[0]
@@ -445,6 +448,7 @@ def TMD_MIL(data: Dataset,
     L = 256
     D = 128
 
+    data.initialize()
     if data.gpsMode == 'load':
 
         data(gpsTransfer=True)
@@ -460,7 +464,7 @@ def TMD_MIL(data: Dataset,
         gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args, L)
 
         optimizer = Adam(
-            learning_rate=data.lr
+            learning_rate=float(data.lr)
         )
 
         loss_function = CategoricalCrossentropy()
@@ -507,7 +511,7 @@ def TMD_MIL(data: Dataset,
         accNetwork = accEncoder.build(data.inputShape, data.shl_args, L, D)
 
         optimizer = Adam(
-            learning_rate=data.lr
+            learning_rate=float(data.lr)
         )
 
         loss_function = CategoricalCrossentropy()
@@ -568,11 +572,16 @@ def TMD_MIL(data: Dataset,
     model_name = 'TMD_%s_model.h5' % model_type
     filepath = os.path.join(save_dir, model_name)
 
+    try:
+        os.remove(filepath)
+    except OSError as e:
+        print("Error: %s - %s." % (e.filename, e.strerror))
+
     val_steps = data.valSize // data.valBatchSize
     train_steps = data.trainSize // data.trainBatchSize
     test_steps = data.testSize // data.testBatchSize
 
-    optimizer = Adam(learning_rate=data.lr)
+    optimizer = Adam(learning_rate=float(data.lr))
 
     loss_function = CategoricalCrossentropy()
 
@@ -658,7 +667,7 @@ def TMD_MIL(data: Dataset,
 
     TMDMiller.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    y_, y, lengths = data.yToSequence(Model=TMDMiller, verbose=False)
+    y_, y, lengths, transition = data.yToSequence(Model=TMDMiller, get_transition=True)
 
     accuracy = accuracy_score(y, y_)
     f1 = f1_score(y, y_, average='macro')
@@ -670,21 +679,22 @@ def TMD_MIL(data: Dataset,
     postF1 = None
 
     if postprocessing:
+        n_classes = 5 if data.motorized else 8
+
         params = hmmParams()
-        confusion, transition = params(data.complete, data.testUser)
+        confusion = params(data.complete, data.motorized)
 
-        startprob = [1. / 8. for _ in range(8)]
+        discrete_model = MultinomialHMM(n_components=n_classes,
+                                        algorithm='viterbi',
+                                        n_iter=300,
+                                        init_params='')
 
-        HMM = MultinomialHMM(n_components=8,
-                             algorithm='viterbi',
-                             random_state=93,
-                             n_iter=100)
+        discrete_model.n_features = n_classes
+        discrete_model.startprob_ = [1. / n_classes for _ in range(n_classes)]
+        discrete_model.transmat_ = transition
+        discrete_model.emissionprob_ = confusion
 
-        HMM.startprob_ = startprob
-        HMM.transmat_ = transition
-        HMM.emissionprob_ = confusion
-
-        postY_ = HMM.predict(y_, lengths)
+        postY_ = discrete_model.predict(y_, lengths)
         postAccuracy = accuracy_score(y, postY_)
         postF1 = f1_score(y, postY_, average='macro')
 
@@ -697,3 +707,4 @@ def TMD_MIL(data: Dataset,
     del data
 
     return accuracy, f1, postAccuracy, postF1
+

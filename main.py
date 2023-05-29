@@ -181,6 +181,8 @@ def execute(repeat=10,
 
             scores = scores.append(theseScores, ignore_index=True)
 
+            save(hparams)
+
 
 def save(hparams=None):
     if not hparams:
@@ -212,25 +214,27 @@ def HpExecute(repeat=10,
               mVerbose=False):
     global scores
 
+    motorized_s = [False]
     positions = ['Hand', 'Torso', 'Bag', 'Hips']
-    for position in positions:
-        scores = pd.DataFrame()
-        config_edit('train_args', 'train_position', position)
-        config_edit('train_args', 'test_position', position)
-        hparams = 'position-' + str(position)
-        execute(repeat=repeat,
-                all_users=all_users,
-                postprocessing=postprocessing,
-                regenerate=regenerate,
-                hparams=hparams,
-                mVerbose=mVerbose)
+    for motorized in motorized_s:
+        for position in positions:
+            scores = pd.DataFrame()
+            config_edit('train_args', 'motorized', motorized)
+            config_edit('train_args', 'test_position', position)
+            hparams = 'motorized-' + str(motorized) + '-test_position-' + str(position)
+            execute(repeat=repeat,
+                    all_users=all_users,
+                    postprocessing=postprocessing,
+                    regenerate=regenerate,
+                    hparams=hparams,
+                    mVerbose=mVerbose)
 
 
 def main():
     try:
         HpExecute(repeat=3,
                   all_users=True,
-                  postprocessing=False,
+                  postprocessing=True,
                   regenerate=False,
                   mVerbose=False)
     finally:
