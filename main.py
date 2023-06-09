@@ -214,20 +214,43 @@ def HpExecute(repeat=10,
               mVerbose=False):
     global scores
 
-    motorized_s = [False]
-    positions = ['Hand', 'Torso', 'Bag', 'Hips']
-    for motorized in motorized_s:
-        for position in positions:
-            scores = pd.DataFrame()
-            config_edit('train_args', 'motorized', motorized)
-            config_edit('train_args', 'test_position', position)
-            hparams = 'motorized-' + str(motorized) + '-test_position-' + str(position)
-            execute(repeat=repeat,
-                    all_users=all_users,
-                    postprocessing=postprocessing,
-                    regenerate=regenerate,
-                    hparams=hparams,
-                    mVerbose=mVerbose)
+    accBagSizes = [1, 2, 3, 4, 5]
+    totalD = 1800
+    for accBagSize in accBagSizes:
+        scores = pd.DataFrame()
+        duration = int(totalD / accBagSize)
+        config_edit('data_args', 'accBagSize', accBagSize)
+        config_edit('train_args', 'accBagSize', accBagSize)
+        config_edit('data_args', 'accDuration', duration)
+        config_edit('train_args', 'accDuration', duration)
+        config_edit('data_args', 'accBagStride', duration)
+        config_edit('train_args', 'accBagStride', duration)
+        hparams = 'accBagSize-' + str(accBagSize)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose)
+
+
+def HpExecute2(repeat=10,
+               all_users=True,
+               postprocessing=False,
+               regenerate=True,
+               mVerbose=False):
+    global scores
+
+    headss = [1, 2, 3, 4]
+    for heads in headss:
+        config_edit('train_args', 'heads', heads)
+        hparams = 'heads-' + str(heads)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose)
 
 
 def main():
@@ -235,7 +258,7 @@ def main():
         HpExecute(repeat=3,
                   all_users=True,
                   postprocessing=True,
-                  regenerate=False,
+                  regenerate=True,
                   mVerbose=False)
     finally:
         save()

@@ -1,13 +1,15 @@
-
+import matplotlib.pyplot as plt
+import numpy as np
 from scipy.signal import spectrogram
 from scipy.interpolate import interp2d
 from augment import *
 from gpsProcessing import *
 from mySpectrogram import LogBands, my_tvs, my_tvs2
+from math import floor, ceil
 
 
 class CategoricalTransformer:
-    def __init__(self, motorized = False):
+    def __init__(self, motorized=False):
         self.motorized = motorized
         self.n_classes = 5 if motorized else 8
         self.encoding = np.zeros((self.n_classes, self.n_classes), dtype=np.float32)
@@ -41,6 +43,7 @@ class temporalTransformer:
         self.syncing = shl_args.train_args['sync']
         self.bagPositions = shl_args.train_args['train_bag_positions']
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
+        self.pyramid = shl_args.train_args['pyramid']
 
         self.rawSignals = {
             'Acc_x': 0,
@@ -77,12 +80,14 @@ class temporalTransformer:
     def __call__(self, acceleration, is_train=True, position=None, timeInfo=False):
 
         signals = None
-        signal = None
         outputs = None
         time = None
 
         if self.preprocessing:
-            signals = {}
+            if self.pyramid:
+                signals = [{} for _ in range(self.bagSize)]
+            else:
+                signals = {}
 
         else:
             if self.transfer and not self.MIL:
@@ -95,11 +100,52 @@ class temporalTransformer:
                     [acceleration[0][i * self.stride: i * self.stride + self.length] for i in range(self.bagSize)]
                 )
 
+        if type(acceleration) == list:
+            for l, layer in enumerate(acceleration):
+                layerPos = position[:self.bagSize - l]
+                accXYZ = np.array([layer[i, :, 3 * pos: 3 * pos + 3] for i, pos in layerPos])
 
-        accXYZ = np.array([acceleration[i, :, 3 * pos: 3 * pos + 3] for i, pos in position])
+                if timeInfo:
+                    time = acceleration[:, :, -3:]
 
-        if timeInfo:
-            time = acceleration[:, :, -3:]
+                signals[l] = self.generate_signals(accXYZ, is_train)
+
+        else:
+            accXYZ = np.array([acceleration[i, :, 3 * pos: 3 * pos + 3] for i, pos in position])
+
+            if timeInfo:
+                time = acceleration[:, :, -3:]
+
+            signals = self.generate_signals(accXYZ, is_train)
+
+        if self.preprocessing:
+            return signals
+
+        else:
+            if self.bagSize:
+                n_null = self.bagSize - outputs.shape[0]
+
+                if n_null > 0:
+                    extra_nulls = np.zeros((n_null, self.length, self.channels))
+                    outputs = np.concatenate((outputs, extra_nulls),
+                                             axis=0)
+
+                if self.transfer and not self.MIL:
+                    outputs = outputs[0]
+
+                    if timeInfo:
+                        time = time[0]
+
+            if timeInfo:
+                return outputs, time
+
+            else:
+                return outputs, None
+
+    def generate_signals(self, accXYZ, is_train=True):
+
+        if self.preprocessing:
+            outputs = {}
 
         if is_train and self.augmentations:
 
@@ -156,7 +202,7 @@ class temporalTransformer:
                         signal = np.concatenate((signal, np.zeros((signal.shape[0], 1))), axis=1)
 
             if self.preprocessing:
-                signals[thisSignal] = signal
+                outputs[thisSignal] = signal
                 del signal
 
             else:
@@ -169,29 +215,7 @@ class temporalTransformer:
                         axis=2
                     )
 
-        if self.preprocessing:
-            return signals
-
-        else:
-            if self.bagSize:
-                n_null = self.bagSize - outputs.shape[0]
-
-                if n_null > 0:
-                    extra_nulls = np.zeros((n_null, self.length, self.channels))
-                    outputs = np.concatenate((outputs, extra_nulls),
-                                             axis=0)
-
-                if self.transfer and not self.MIL:
-                    outputs = outputs[0]
-
-                    if timeInfo:
-                        time = time[0]
-
-            if timeInfo:
-                return outputs, time
-
-            else:
-                return outputs, None
+        return outputs
 
 
 class spectrogramTransformer:
@@ -224,6 +248,12 @@ class spectrogramTransformer:
         self.bagPositions = shl_args.train_args['train_bag_positions']
         self.bagSize = shl_args.train_args['accBagSize']
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
+        self.pyramid = shl_args.train_args['pyramid']
+        if self.pyramid:
+            self.totalBagSize = int(self.bagSize * (self.bagSize + 1) / 2)
+
+        else:
+            self.totalBagSize = self.bagSize
 
         self.temp_tfrm = temporalTransformer(shl_args=shl_args,
                                              preprocessing=True)
@@ -271,7 +301,7 @@ class spectrogramTransformer:
                 if self.transfer and not self.MIL:
                     return self.height, self.width, self.channels
 
-                return self.bagSize * self.posPerInstance, self.height, self.width, self.channels
+                return self.totalBagSize * self.posPerInstance, self.height, self.width, self.channels
 
             elif self.concat2D == 'Frequency':
 
@@ -280,7 +310,7 @@ class spectrogramTransformer:
                 if self.transfer and not self.MIL:
                     return self.height, self.width, 1
 
-                return self.bagSize * self.posPerInstance, self.height, self.width, 1
+                return self.totalBagSize * self.posPerInstance, self.height, self.width, 1
 
         if self.dimension == '1D':
 
@@ -289,13 +319,13 @@ class spectrogramTransformer:
             if self.transfer and not self.MIL:
                 return self.height, self.channels
 
-            return self.bagSize * self.posPerInstance, self.height, self.channels
+            return self.totalBagSize * self.posPerInstance, self.height, self.channels
 
     def get_time_shape(self):
         if self.transfer and not self.MIL:
             return self.length, 3
 
-        return self.bagSize * self.posPerInstance, self.length, 3
+        return self.totalBagSize * self.posPerInstance, self.length, 3
 
     def __call__(self, acceleration, is_train=True, position=None, timeInfo=False):
 
@@ -304,25 +334,81 @@ class spectrogramTransformer:
         time = None
 
         if self.transfer and not self.MIL:
-            acceleration = np.array([acceleration[0][self.pivot * self.stride: self.pivot * self.stride + self.length]])
+            accBag = np.array([acceleration[0][self.pivot * self.stride: self.pivot * self.stride + self.length]])
             position = [position[0]]
 
         else:
-            acceleration = np.array(
-                [acceleration[0][i * self.stride: i * self.stride + self.length] for i in range(self.bagSize)]
-            )
+            if self.pyramid:
+                accBag = []
+
+                for j in range(1, self.bagSize + 1):
+                    layer = np.array(
+                        [acceleration[0][i * self.stride: i * self.stride + j * self.length]
+                         for i in range(self.bagSize - j + 1)]
+                    )
+
+                    accBag.append(layer)
+
+            else:
+                accBag = np.array([acceleration[0][i * self.stride: i * self.stride + self.length]
+                                         for i in range(self.bagSize)])
 
         if timeInfo:
             time = acceleration[:, :, -3:]
 
-        signals = self.temp_tfrm(acceleration,
+        signals = self.temp_tfrm(accBag,
                                  is_train=is_train,
                                  position=position)
 
-        del acceleration
+        del accBag
 
         if is_train:
             masking = Masking(self.augmentations, self.out_size)
+
+        if type(signals) == list:
+            for signalsLayer in signals:
+                spectroLayer = self.generate_spectrograms(signalsLayer, masking, is_train)
+
+                if outputs is None:
+                    outputs = spectroLayer
+                else:
+                    outputs = np.concatenate((outputs, spectroLayer), axis=0)
+
+        else:
+            outputs = self.generate_spectrograms(signals, masking, is_train)
+
+        if self.totalBagSize:
+
+            n_null = self.totalBagSize - outputs.shape[0]
+            if n_null > 0:
+                extra_nulls = None
+
+                if self.dimension == '2D':
+                    if self.concat2D == 'Depth':
+                        extra_nulls = np.zeros((n_null, self.height, self.width, self.channels))
+
+                    elif self.concat2D == 'Frequency':
+                        extra_nulls = np.zeros((n_null, self.height, self.width, 1))
+
+                if self.dimension == '1D':
+                    extra_nulls = np.zeros((n_null, self.height, self.channels))
+
+                outputs = np.concatenate((outputs, extra_nulls),
+                                         axis=0)
+
+            if self.transfer and not self.MIL:
+                outputs = outputs[0]
+                if timeInfo:
+                    time = time[0]
+
+        if timeInfo:
+            return outputs, time
+
+        else:
+            return outputs, None
+
+    def generate_spectrograms(self, signals, masking, is_train):
+        outputs = None
 
         for thisSignal in signals.keys():
 
@@ -395,35 +481,7 @@ class spectrogramTransformer:
                                                   thisSpectrogram),
                                                  axis=2)
 
-        if self.bagSize:
-
-            n_null = self.bagSize - outputs.shape[0]
-            if n_null > 0:
-                extra_nulls = None
-
-                if self.dimension == '2D':
-                    if self.concat2D == 'Depth':
-                        extra_nulls = np.zeros((n_null, self.height, self.width, self.channels))
-
-                    elif self.concat2D == 'Frequency':
-                        extra_nulls = np.zeros((n_null, self.height, self.width, 1))
-
-                if self.dimension == '1D':
-                    extra_nulls = np.zeros((n_null, self.height, self.channels))
-
-                outputs = np.concatenate((outputs, extra_nulls),
-                                         axis=0)
-
-            if self.transfer and not self.MIL:
-                outputs = outputs[0]
-                if timeInfo:
-                    time = time[0]
-
-        if timeInfo:
-            return outputs, time
-
-        else:
-            return outputs, None
+        return outputs
 
 
 class gpsTransformer:
@@ -446,8 +504,9 @@ class gpsTransformer:
         if not self.padLimit:
             self.padLimit = self.length
         self.syncing = shl_args.train_args['sync']
-        self.totalLength = None
+        self.finalLength = None
         self.featureSize = None
+        self.symmetric = shl_args.train_args['symmetric']
 
         self.gpsFeatures = {
             'Acc': 0,
@@ -467,23 +526,20 @@ class gpsTransformer:
     @property
     def get_shape(self):
 
-        if 'Jerk' in self.timeFeatures:
-            self.totalLength = self.length - 3
+        if 'Acceleration' in self.timeFeatures or 'BearingRate' in self.timeFeatures:
+            self.finalLength = self.length - 4 if self.symmetric else self.length - 2
 
-        elif 'Acceleration' in self.timeFeatures or 'BearingRate' in self.timeFeatures:
-            self.totalLength = self.length - 2
-
-        elif 'Distance' in self.timeFeatures or 'Velocity' in self.timeFeatures or 'Bearing' in self.timeFeatures:
-            self.totalLength = self.length - 1
+        elif 'Distance' in self.timeFeatures or 'Velocity' in self.timeFeatures:
+            self.finalLength = self.length - 2 if self.symmetric else self.length - 1
 
         elif any(gpsFeature in self.timeFeatures for gpsFeature in self.gpsFeatures):
-            self.totalLength = self.length
+            self.finalLength = self.length
 
         if self.transfer:
-            windowShape = (self.totalLength, self.channels)
+            windowShape = (self.finalLength, self.channels)
 
         else:
-            windowShape = (self.bagSize, self.totalLength, self.channels)
+            windowShape = (self.bagSize, self.finalLength, self.channels)
 
         nStat = 0
         nPoint = 0
@@ -491,11 +547,11 @@ class gpsTransformer:
             if feature in ['TotalDistance', 'TotalVelocity', 'TotalMovability']:
                 nStat += 1
 
-            elif feature in ['Min', 'Max', 'Mean', 'Var', 'Quantile', 'Skewness', 'Kurtosis']:
+            elif feature in ['Min', 'Max', 'Mean', 'Var']:
                 nStat += self.channels
 
         for feature in self.pointFeatures:
-            if feature in ['Accuracy', 'Velocity', 'Acceleration', 'Jerk', 'BearingRate']:
+            if feature in ['Accuracy', 'Velocity', 'Acceleration', 'BearingRate']:
                 nPoint += 1
 
         self.featureSize = nStat + nPoint
@@ -571,30 +627,23 @@ class gpsTransformer:
 
             if timeFeature in self.gpsFeatures:
                 sequence = location[:, :, self.gpsFeatures[timeFeature]]
+
             else:
                 if timeFeature == 'Distance':
 
-                    sequence = distance(location, length)
+                    sequence = distance(location, samples, length, self.symmetric)
 
                 elif timeFeature == 'Velocity':
 
-                    sequence = velocity(location, samples, length)
+                    sequence = velocity(location, samples, length, self.symmetric)
 
                 elif timeFeature == 'Acceleration':
 
-                    sequence = acceleration(location, samples, length)
-
-                elif timeFeature == 'Jerk':
-
-                    sequence = jerk(location, samples, length)
-
-                elif timeFeature == 'Bearing':
-
-                    sequence = bearing(location, samples, length)
+                    sequence = acceleration(location, samples, length, self.symmetric)
 
                 elif timeFeature == 'BearingRate':
 
-                    sequence = bearing_rate(location, samples, length)
+                    sequence = bearing_rate(location, samples, length, self.symmetric)
 
                 if self.mean:
                     statisticalFeatures = np.mean(sequence, axis=1)[:, np.newaxis] if statisticalFeatures is None \
@@ -606,17 +655,28 @@ class gpsTransformer:
 
             if np.size(sequence):
                 sequence = np.pad(sequence, [(0, 0), (front_pad, end_pad)],
-                                    mode='constant', constant_values=self.maskValue)
+                                  mode='constant',
+                                  constant_values=self.maskValue)
 
             if window is None:
-                window = sequence[:, :, np.newaxis]
+                if not self.symmetric:
+                    window = sequence[:, -self.finalLength:, np.newaxis]
+
+                else:
+                    len = sequence.shape[1]
+                    start = int(len // 2 - floor(self.finalLength / 2.))
+                    end = int(len // 2 + ceil(self.finalLength / 2.))
+                    window = sequence[:, start:end, np.newaxis]
 
             else:
-                window = np.concatenate(
-                    (window[:, -self.totalLength:, :],
-                     sequence[:, -self.totalLength:, np.newaxis]),
-                    axis=2
-                )
+                if not self.symmetric:
+                    window = np.concatenate((window, sequence[:, -self.finalLength:, np.newaxis]), axis=2)
+
+                else:
+                    len = sequence.shape[1]
+                    start = int(len // 2 - floor(self.finalLength / 2.))
+                    end = int(len // 2 + ceil(self.finalLength / 2.))
+                    window = np.concatenate((window, sequence[:, start:end, np.newaxis]), axis=2)
 
         done = False
         for statFeature in self.statFeatures:
@@ -635,7 +695,7 @@ class gpsTransformer:
 
             else:
                 if statFeature == 'TotalMovability':
-                    distances = distance(location, length)
+                    distances = distance(location, samples, length, False)
 
                     Movability = np.zeros((samples, 1))
                     for i, (positions, eachDistance) in enumerate(zip(location, distances)):
@@ -656,18 +716,15 @@ class gpsTransformer:
             n_null = self.bagSize - samples
 
             if n_null > 0:
-                extra_nulls = np.zeros((n_null, self.totalLength, self.channels)) + self.maskValue
-                window = np.concatenate((window, extra_nulls),
-                                         axis=0)
+                extra_nulls = np.zeros((n_null, self.finalLength, self.channels)) + self.maskValue
+                window = np.concatenate((window, extra_nulls), axis=0)
 
                 extra_nulls = np.zeros((n_null, self.featureSize)) + self.maskValue
-                features = np.concatenate((features, extra_nulls),
-                                                     axis=0)
+                features = np.concatenate((features, extra_nulls), axis=0)
 
                 if timeInfo:
                     extra_nulls = np.zeros((n_null, self.length, 3)) + self.maskValue
-                    time = np.concatenate((time, extra_nulls),
-                                          axis=0)
+                    time = np.concatenate((time, extra_nulls), axis=0)
 
         if self.transfer:
             window = window[0]

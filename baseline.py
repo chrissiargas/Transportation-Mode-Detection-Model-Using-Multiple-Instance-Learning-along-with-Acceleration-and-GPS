@@ -10,15 +10,18 @@ from main import config_edit
 import os
 
 regenerateData = False
-regenerateCSV = False
-motorized = True
+regenerateCSV = True
+motorized = False
 dT_threshold = 3600
 useVal = True
 
-train_position = 'all'
+train_position = None
 for test_position in ['Hand', 'Torso', 'Bag', 'Hips']:
     scores = pd.DataFrame()
     for user in [1, 2, 3]:
+
+        train_position = train_position if train_position == 'all' else test_position
+        config_edit('train_args', 'train_position', train_position)
         config_edit('train_args', 'test_position', test_position)
         config_edit('train_args', 'test_user', user)
         print('USER: ' + str(user))
@@ -28,6 +31,7 @@ for test_position in ['Hand', 'Torso', 'Bag', 'Hips']:
             filepath += 'train_position-' + train_position + '-test-position-' + test_position
 
             data = Dataset(regenerate=regenerateData)
+            data.initialize()
             train, val, test, train_val = data.toCSVs(filepath=filepath, motorized=motorized)
 
         else:

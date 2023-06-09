@@ -1129,6 +1129,7 @@ class buildData:
         bagStride = self.data.args.data_args['accBagStride']
         duration = self.data.args.data_args['accDuration']
         sync = self.data.args.data_args['sync']
+        majorityVoting = self.data.args.data_args['majorityVoting']
         percentage_threshold = self.data.args.data_args['majority']
         threshold = int(percentage_threshold * duration)
 
@@ -1143,22 +1144,28 @@ class buildData:
 
         for i, sample_lbs in enumerate(self.labels):
 
-            labels = sample_lbs[pivot * bagStride : pivot * bagStride + duration, 0]
+            if majorityVoting:
+                labels = sample_lbs[pivot * bagStride : pivot * bagStride + duration, 0]
 
-            classNum = {}
+                classNum = {}
 
-            for label in labels:
+                for label in labels:
 
-                if not label in classNum:
-                    classNum[label] = 1
+                    if not label in classNum:
+                        classNum[label] = 1
 
-                else:
-                    classNum[label] += 1
+                    else:
+                        classNum[label] += 1
 
-            topClass = [k for k, v in classNum.items() if v >= threshold]
+                topClass = [k for k, v in classNum.items() if v >= threshold]
 
-            if len(topClass) and topClass[0] != 0:
-                output_indices.append([i, label_position, topClass[0]])
+                if len(topClass) and topClass[0] != 0:
+                    output_indices.append([i, label_position, topClass[0]])
+
+            else:
+                label = sample_lbs[label_position, 0]
+                if label != 0:
+                    output_indices.append([i, label_position, label])
 
         return np.array(output_indices)
 

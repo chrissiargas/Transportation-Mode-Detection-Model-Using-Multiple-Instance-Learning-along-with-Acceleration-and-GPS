@@ -21,7 +21,7 @@ from myMetrics import valMetrics, valTables, testMetrics, testTables
 from sklearn.metrics import accuracy_score, f1_score
 
 
-def getAccEncoder(input_shapes, args, L, transfer=False):
+def getAccEncoder(input_shapes, args, L, transfer=False, scale=1):
     kernelInitializer = initializers.he_uniform()
     dimension = 128
     shape = args.train_args['acc_shape']
@@ -187,7 +187,7 @@ def getAccEncoder(input_shapes, args, L, transfer=False):
 
     return Model(inputs=accBag,
                  outputs=accEncodings,
-                 name='AccelerationEncoder')
+                 name='AccelerationEncoder' + str(scale))
 
 
 def getGpsEncoder(input_shapes, args, L):
@@ -201,6 +201,7 @@ def getGpsEncoder(input_shapes, args, L):
     gpsFeatures = Input(shape=gpsFeaturesShape)
 
     X = gpsSeries
+    # X = tf.reshape(X, (-1, gpsSeriesShape[0] * gpsSeriesShape[1]))
 
     masking_layer = Masking(mask_value=mask, name='maskLayer1')
     X = masking_layer(X)
@@ -208,7 +209,7 @@ def getGpsEncoder(input_shapes, args, L):
     bnLayer = BatchNormalization(name='locBatch', trainable=False)
     X = bnLayer(X)
 
-    lstmLayer = Bidirectional(LSTM(units=64, name='locLSTM'))
+    lstmLayer = Bidirectional(LSTM(units=128, name='locLSTM'))
     X = lstmLayer(X)
 
     X = tf.concat([X, gpsFeatures], axis=1)
@@ -317,7 +318,7 @@ def getClassifier(L, n_units=8):
     X = head
 
     finalLayer = Dense(units=n_units,
-                       activation='softmax',
+                       activation='sigmoid',
                        kernel_initializer=kernel_initializer)
 
     yPred = finalLayer(X)
@@ -333,15 +334,17 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
     motorized = args.train_args['motorized']
     n_classes = 5 if motorized else 8
     accTransfer = True if accTransferNet else False
-    accNetwork = getAccEncoder(input_shapes, args, L, accTransfer)
+    pyramid = args.train_args['pyramid']
+    accBagSize = args.train_args['accBagSize']
+    scales = accBagSize if pyramid else 1
 
-    if useAccMIL:
-        accMIL = getMIL(args, L, D, True)
+    accNetworks = [getAccEncoder(input_shapes, args, L, accTransfer, scale+1) for scale in range(scales)]
+    accMIL = getMIL(args, L, D, True)
 
     if accTransfer:
-
-        accNetwork.set_weights(accTransferNet.get_layer('AccelerationEncoder').get_weights())
-        accNetwork.trainable = False
+        for scale in range(scales):
+            accNetworks[scale].set_weights(accTransferNet.get_layer('AccelerationEncoder'+str(scale+1)).get_weights())
+            accNetworks[scale].trainable = False
 
         if useAccMIL:
             accMIL.set_weights(accTransferNet.get_layer('AccelerationMIL').get_weights())
@@ -364,7 +367,7 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
     classifier = getClassifier(L, n_units=n_classes)
 
     accShape = input_shapes[0]
-    accBagSize = list(accShape)[0]
+    totalAccBagSize = list(accShape)[0]
     accSize = list(accShape)[1:]
 
     gpsSeriesShape = input_shapes[1]
@@ -385,35 +388,37 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
     concGpsSignalsBags = tf.reshape(gpsSeriesBag, (batchSize * gpsBagSize, *gpsSeriesSize))
     concGpsFeaturesBags = tf.reshape(gpsFeaturesBag, (batchSize * gpsBagSize, *gpsFeaturesSize))
 
-    accEncodings = accNetwork(concAccBags)
     gpsEncodings = gpsNetwork([concGpsSignalsBags, concGpsFeaturesBags])
 
-    if not useAccMIL:
-        accEncodings = tf.reshape(accEncodings, [batchSize, accBagSize, L])
-        gpsEncodings = tf.reshape(gpsEncodings, [batchSize, gpsBagSize, L])
-        Encodings = concatenate([accEncodings, gpsEncodings], axis=-2)
-        Encodings = tf.reshape(Encodings, (batchSize * (accBagSize + gpsBagSize), L))
-        poolings = []
+    if useAccMIL:
+        accScaleBags = []
+        begin = 0
+        for scale in range(scales):
+            accScaleBags.append(tf.reshape(accBag[:, begin:begin+accBagSize-scale],
+                                           (batchSize * (accBagSize - scale), *accSize)))
 
-        for i, MIL in enumerate(MILs):
-            attentionWs = MIL(Encodings)
-            attentionWs = tf.reshape(attentionWs, [batchSize, accBagSize + gpsBagSize])
-            softmax = Softmax(name='weight_layer_' + str(i))
-            attentionWs = tf.expand_dims(softmax(attentionWs), -2)
-            Encodings_ = tf.reshape(Encodings, [batchSize, accBagSize + gpsBagSize, L])
-            flatten = Flatten()
-            poolings.append(flatten(tf.matmul(attentionWs, Encodings_)))
+        for scale in range(scales):
+            scaleEncodings = accNetworks[scale](accScaleBags[scale])
+            scaleEncodings = tf.reshape(scaleEncodings, (batchSize, accBagSize - scale, L))
 
-    else:
-        accAttentionWs = accMIL(accEncodings)
-        accAttentionWs = tf.reshape(accAttentionWs, [batchSize, accBagSize])
-        softmax = Softmax(name='acc_weight_layer')
-        accAttentionWs = tf.expand_dims(softmax(accAttentionWs), -2)
-        accEncodings = tf.reshape(accEncodings, [batchSize, accBagSize, L])
-        accPooling = tf.matmul(accAttentionWs, accEncodings)
+            if scale == 0:
+                accEncodings = scaleEncodings
+
+            else:
+                accEncodings = concatenate([accEncodings, scaleEncodings], axis=-2)
+
+        accEncodings = tf.reshape(accEncodings, (batchSize * totalAccBagSize, L))
+
+        accWs = accMIL(accEncodings)
+        accWs = tf.reshape(accWs, [batchSize, totalAccBagSize])
+        softmax = Softmax(name='weight_layer')
+        accWs = tf.expand_dims(softmax(accWs), -2)
+        accEncodings = tf.reshape(accEncodings, (batchSize, totalAccBagSize, L))
+        accPooling = tf.matmul(accWs, accEncodings)
         gpsEncodings = tf.reshape(gpsEncodings, [batchSize, gpsBagSize, L])
         Encodings = concatenate([accPooling, gpsEncodings], axis=-2)
         Encodings = tf.reshape(Encodings, (batchSize * (1 + gpsBagSize), L))
+
         poolings = []
 
         for i, MIL in enumerate(MILs):
@@ -422,6 +427,24 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
             softmax = Softmax(name='weight_layer_' + str(i))
             attentionWs = tf.expand_dims(softmax(attentionWs), -2)
             Encodings_ = tf.reshape(Encodings, [batchSize, 1 + gpsBagSize, L])
+            flatten = Flatten()
+            poolings.append(flatten(tf.matmul(attentionWs, Encodings_)))
+
+    else:
+        accEncodings = accNetworks[0](concAccBags)
+        accEncodings = tf.reshape(accEncodings, [batchSize, accBagSize, L])
+        gpsEncodings = tf.reshape(gpsEncodings, [batchSize, gpsBagSize, L])
+        Encodings = concatenate([accEncodings, gpsEncodings], axis=-2)
+        Encodings = tf.reshape(Encodings, (batchSize * (accBagSize + gpsBagSize), L))
+
+        poolings = []
+
+        for i, MIL in enumerate(MILs):
+            attentionWs = MIL(Encodings)
+            attentionWs = tf.reshape(attentionWs, [batchSize, accBagSize + gpsBagSize])
+            softmax = Softmax(name='weight_layer_' + str(i))
+            attentionWs = tf.expand_dims(softmax(attentionWs), -2)
+            Encodings_ = tf.reshape(Encodings, [batchSize, accBagSize + gpsBagSize, L])
             flatten = Flatten()
             poolings.append(flatten(tf.matmul(attentionWs, Encodings_)))
 

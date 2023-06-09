@@ -15,7 +15,7 @@ from dataset import Dataset
 from myMetrics import accValMetrics, accTestMetrics, accValTables, accTestTables
 
 
-def getAccEncoder(input_shapes, args, L):
+def getAccEncoder(input_shapes, args, L, scale=1):
     kernelInitializer = initializers.he_uniform()
 
     useMIL = args.train_args['separate_MIL']
@@ -185,7 +185,7 @@ def getAccEncoder(input_shapes, args, L):
 
     return Model(inputs=accSpectrograms,
                  outputs=accEncodings,
-                 name='AccelerationEncoder')
+                 name='AccelerationEncoder' + str(scale))
 
 
 def getMIL(args, L, D):
@@ -223,7 +223,7 @@ def getClassifier(L, n_units=8):
 
     X = pooling
 
-    finalLayer = Dense(units=n_units, activation='softmax', kernel_initializer=kernelInitializer)
+    finalLayer = Dense(units=n_units, activation='sigmoid', kernel_initializer=kernelInitializer)
 
     yPred = finalLayer(X)
 
@@ -235,49 +235,54 @@ def build(input_shapes, args, L=32, D=12):
     useMIL = args.train_args['separate_MIL']
     motorized = args.train_args['motorized']
     n_classes = 5 if motorized else 8
-    accShape = input_shapes[0]
+    shape = input_shapes[0]
     posShape = input_shapes[1]
-    accNetwork = getAccEncoder(accShape, args, L)
+    pyramid = args.train_args['pyramid']
+    bagSize = args.train_args['accBagSize']
+    scales = bagSize if pyramid else 1
+
+    bag = Input(shape)
+    positions = Input(posShape, name='positional')
+    totalBagSize = list(shape)[0]
+    instanceSize = list(shape)[1:]
+
+    accNetworks = [getAccEncoder(shape, args, L, scale+1) for scale in range(scales)]
+    accMIL = getMIL(args, L, D)
     classifier = getClassifier(L, n_units=n_classes)
-    accBag = Input(accShape)
-    accPos = Input(posShape, name='positional')
-    accMIL = None
-    accBagSize = None
 
-    if useMIL:
-        accMIL = getMIL(args, L, D)
-
+    scaleBags = []
     if useMIL:
 
-        accBagSize = list(accShape)[0]
-        accSize = list(accShape)[1:]
-        concAccBag = tf.reshape(accBag, (batchSize * accBagSize, *accSize))
+        begin = 0
+        for scale in range(scales):
+            scaleBags.append(tf.reshape(bag[:, begin:begin+bagSize-scale], (batchSize * (bagSize-scale), *instanceSize)))
+            begin += bagSize - scale
 
-    else:
+        for scale in range(scales):
+            scaleEncodings = accNetworks[scale](scaleBags[scale])
+            scaleEncodings = tf.reshape(scaleEncodings, [batchSize, bagSize - scale, L])
 
-        concAccBag = accBag
+            if scale == 0:
+                encodings = scaleEncodings
+            else:
+                encodings = concatenate([encodings, scaleEncodings], axis=-2)
 
-    accEncodings = accNetwork(concAccBag)
+        encodings = tf.reshape(encodings, (batchSize * totalBagSize, L))
 
-    if useMIL:
-
-        accAttentionWs = accMIL(accEncodings)
-        accAttentionWs = tf.reshape(accAttentionWs, [batchSize, accBagSize])
+        attentionWs = accMIL(encodings)
+        attentionWs = tf.reshape(attentionWs, [batchSize, totalBagSize])
         softmax = Softmax(name='weight_layer')
-        accAttentionWs = tf.expand_dims(softmax(accAttentionWs), -2)
-        accEncodings = tf.reshape(accEncodings, [batchSize, accBagSize, L])
-
-        if batchSize == 1:
-            accPooling = tf.expand_dims(tf.squeeze(tf.matmul(accAttentionWs, accEncodings)), axis=0)
-        else:
-            accPooling = tf.squeeze(tf.matmul(accAttentionWs, accEncodings))
-
-        yPred = classifier(accPooling)
+        attentionWs = tf.expand_dims(softmax(attentionWs), -2)
+        encodings = tf.reshape(encodings, [batchSize, totalBagSize, L])
+        pooling = tf.squeeze(tf.matmul(attentionWs, encodings))
+        yPred = classifier(pooling)
 
     else:
-        yPred = classifier(accEncodings)
+        encodings = accNetworks[0](bag)
+        yPred = classifier(encodings)
+        return Model([bag, positions], yPred)
 
-    return Model([accBag, accPos], yPred)
+    return Model([bag, positions], yPred)
 
 
 def fit(data: Dataset,

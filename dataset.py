@@ -441,7 +441,6 @@ class Dataset:
 
     def split_train_val(self, dataIndices):
 
-        seed = 1
         originalIndices = dataIndices
         dataIndices = pd.DataFrame(dataIndices, columns=['index', 'user_label'])
         count = dataIndices['user_label'].value_counts()
@@ -462,7 +461,7 @@ class Dataset:
                 candidates = candidates[candidates['user_label'] == 1]
                 tmp_count = int(tmp_count * 0.95)
 
-            index = candidates.sample(random_state=seed).index[0]
+            index = candidates.sample(random_state=1).index[0]
             val_indices.append(index)
             n_indices = 1
             up = 1
@@ -557,7 +556,7 @@ class Dataset:
         transition_mx = pd.DataFrame()
         classes = [i for i in range(self.n_classes)]
 
-        if self.testPosition != 'all':
+        if self.testPosition != 'all' or not self.multipleTest:
             nSeqs = 1
             seqPos = [[]]
             inputs = [[[] for _ in range(4)]]
@@ -592,12 +591,12 @@ class Dataset:
 
                 elif self.testBagPositions == 'random':
                     if not len(seqPos[0]):
-                        seqPos = [random.sample(range(nSeqs), nSeqs) for _ in range(self.accBagSize)]
+                        seqPos = [random.sample(range(4), nSeqs) for _ in range(self.accBagSize)]
                         seqPos = list(map(list, zip(*seqPos)))
                         seqPos = np.reshape(seqPos, (nSeqs, self.accBagSize, 1)).tolist()
 
                     else:
-                        pos = random.sample(range(nSeqs), nSeqs)
+                        pos = random.sample(range(4), nSeqs)
                         for s in range(nSeqs):
                             seqPos[s].append([pos[s]])
 
@@ -663,9 +662,6 @@ class Dataset:
                     inputs[s][1].append(gpsSeries)
                     inputs[s][2].append(gpsFeatures)
                     inputs[s][3].append(position)
-
-                    if not self.multipleTest:
-                        break
 
                 if index == self.bags - 1 or \
                         self.labels[index + 1][-1] - time > self.transThreshold or \
