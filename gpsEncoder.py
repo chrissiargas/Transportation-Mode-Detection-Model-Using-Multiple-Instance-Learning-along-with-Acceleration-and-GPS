@@ -13,13 +13,17 @@ from keras.metrics import categorical_accuracy
 import os
 from dataset import Dataset
 from myMetrics import gpsValMetrics, gpsTestMetrics, gpsValTables, gpsTestTables
+from sklearn.metrics import accuracy_score, f1_score
 
 
-def getGpsEncoder(input_shapes, args, L):
+def getGpsEncoder(input_shapes, args):
     mask = args.train_args['mask']
+    L = args.train_args['L']
+
     kernelInitializer = initializers.he_uniform()
     gpsSeriesShape = input_shapes[0]
     gpsFeaturesShape = input_shapes[1]
+
     gpsSeries = Input(shape=gpsSeriesShape)
     gpsFeatures = Input(shape=gpsFeaturesShape)
 
@@ -31,8 +35,7 @@ def getGpsEncoder(input_shapes, args, L):
     bnLayer = BatchNormalization(name='locBatch', trainable=False)
     X = bnLayer(X)
 
-    lstmLayer = LSTM(units=128,
-                     name='locLSTM')
+    lstmLayer = Bidirectional(LSTM(units=128, name='locLSTM'))
     X = lstmLayer(X)
 
     X = tf.concat([X, gpsFeatures], axis=1)
@@ -105,16 +108,15 @@ def getClassifier(L, n_units=8):
                  name='Classifier')
 
 
-def build(input_shapes, args, L=256):
+def build(input_shapes, args):
     motorized = args.train_args['motorized']
     n_classes = 5 if motorized else 8
+    L = args.train_args['L']
 
     shape = input_shapes
 
-    gpsNetwork = getGpsEncoder(shape, args, L)
-
+    gpsNetwork = getGpsEncoder(shape, args)
     classifier = getClassifier(L, n_units=n_classes)
-
     gpsSeries = Input(shape[0])
     gpsFeatures = Input(shape[1])
     gpsEncodings = gpsNetwork([gpsSeries, gpsFeatures])
@@ -124,8 +126,7 @@ def build(input_shapes, args, L=256):
     return Model([gpsSeries, gpsFeatures], yPred)
 
 
-def fit(L=256, summary=True, verbose=0, mVerbose=False):
-
+def fit(L=256, summary=True, verbose=0, mVerbose=False, scores=False):
     data = Dataset()
 
     train, val, test = data(gpsTransfer=True)
@@ -156,7 +157,7 @@ def fit(L=256, summary=True, verbose=0, mVerbose=False):
     train_steps = data.trainSize // data.trainBatchSize
     test_steps = data.testSize // data.testBatchSize
 
-    Model = build(input_shapes=data.inputShape, args=data.shl_args, L=L)
+    Model = build(input_shapes=data.inputShape, args=data.shl_args)
 
     optimizer = Adam(learning_rate=data.lr)
 
@@ -204,8 +205,7 @@ def fit(L=256, summary=True, verbose=0, mVerbose=False):
                  save_model,
                  early_stopping,
                  reduce_lr_plateau,
-                 val_metrics,
-                 val_tables]
+                 val_metrics]
 
     Model.fit(
         train,
@@ -219,19 +219,24 @@ def fit(L=256, summary=True, verbose=0, mVerbose=False):
     )
 
     test_metrics = gpsTestMetrics(test, data.testBatchSize, test_steps)
-
     test_tables = gpsTestTables(test,
-                            data.testBatchSize,
-                            test_steps,
-                            file_writer_test)
+                                data.testBatchSize,
+                                test_steps,
+                                file_writer_test)
 
     Model.load_weights(filepath)
+    Model.evaluate(test, steps=test_steps, callbacks=[test_metrics])
 
-    Model.evaluate(test, steps=test_steps, callbacks=[test_metrics, test_tables])
+    if scores:
+        y_, y, lengths, transition = data.yToSequence(Model=Model, get_transition=False, gpsTransfer=True)
 
-    del data.acceleration
-    del data.location
-    del data.labels
-    del data
+        accuracy = accuracy_score(y, y_)
+        f1 = f1_score(y, y_, average='macro')
 
-    return filepath
+        print('accuracy: {}'.format(accuracy))
+        print('f1 score: {}'.format(f1))
+
+    else:
+        accuracy, f1 = 1., 1.
+
+    return filepath, accuracy, f1

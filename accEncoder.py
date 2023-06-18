@@ -13,6 +13,9 @@ from keras.losses import CategoricalCrossentropy
 from keras.metrics import categorical_accuracy
 from dataset import Dataset
 from myMetrics import accValMetrics, accTestMetrics, accValTables, accTestTables
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+import pandas as pd
+import numpy as np
 
 
 def getAccEncoder(input_shapes, args, L):
@@ -188,7 +191,7 @@ def getAccEncoder(input_shapes, args, L):
                  name='AccelerationEncoder')
 
 
-def getMIL(args, L, D):
+def getMIL(L, D):
     kernelInitializer = initializers.glorot_uniform()
     kernelRegularizer = l2(0.01)
 
@@ -230,31 +233,36 @@ def getClassifier(L, n_units=8):
     return Model(inputs=pooling, outputs=yPred, name='Classifier')
 
 
-def build(input_shapes, args, L=32, D=12):
-    batchSize = args.train_args['trainBatchSize']
+def build(input_shapes, args, batchSize=None):
     useMIL = args.train_args['separate_MIL']
     motorized = args.train_args['motorized']
+    L = args.train_args['L']
+    D = args.train_args['D']
+
     n_classes = 5 if motorized else 8
     accShape = input_shapes[0]
     posShape = input_shapes[1]
     accNetwork = getAccEncoder(accShape, args, L)
     classifier = getClassifier(L, n_units=n_classes)
+
     accBag = Input(accShape)
     accPos = Input(posShape, name='positional')
+
+    if batchSize is None:
+        batchSize = tf.shape(accBag)[0]
+
     accMIL = None
     accBagSize = None
 
     if useMIL:
-        accMIL = getMIL(args, L, D)
+        accMIL = getMIL(L, D)
 
     if useMIL:
-
         accBagSize = list(accShape)[0]
         accSize = list(accShape)[1:]
         concAccBag = tf.reshape(accBag, (batchSize * accBagSize, *accSize))
 
     else:
-
         concAccBag = accBag
 
     accEncodings = accNetwork(concAccBag)
@@ -267,11 +275,7 @@ def build(input_shapes, args, L=32, D=12):
         accAttentionWs = tf.expand_dims(softmax(accAttentionWs), -2)
         accEncodings = tf.reshape(accEncodings, [batchSize, accBagSize, L])
 
-        if batchSize == 1:
-            accPooling = tf.expand_dims(tf.squeeze(tf.matmul(accAttentionWs, accEncodings)), axis=0)
-        else:
-            accPooling = tf.squeeze(tf.matmul(accAttentionWs, accEncodings))
-
+        accPooling = tf.squeeze(tf.matmul(accAttentionWs, accEncodings), axis=-2)
         yPred = classifier(accPooling)
 
     else:
@@ -281,10 +285,10 @@ def build(input_shapes, args, L=32, D=12):
 
 
 def fit(data: Dataset,
-        L=256, D=128,
         summary=True,
         verbose=0,
-        mVerbose=False):
+        mVerbose=False,
+        scores=False):
 
     train, val, test = data(accTransfer=True)
 
@@ -303,6 +307,7 @@ def fit(data: Dataset,
     file_writer_test = tf.summary.create_file_writer(logdir + '/cm_test')
     w_file_writer_val = tf.summary.create_file_writer(logdir + '/wm_val')
     w_file_writer_test = tf.summary.create_file_writer(logdir + '/wm_test')
+    std_file_writer_test = tf.summary.create_file_writer(logdir + '/std_test')
 
     save_dir = os.path.join('training', 'saved_models', 'user' + str(data.testUser))
     if not os.path.isdir(save_dir):
@@ -321,7 +326,7 @@ def fit(data: Dataset,
     train_steps = data.trainSize // data.trainBatchSize
     test_steps = data.testSize // data.testBatchSize
 
-    accNetwork = build(input_shapes=data.inputShape, args=data.shl_args, L=L, D=D)
+    accNetwork = build(input_shapes=data.inputShape, args=data.shl_args)
 
     optimizer = Adam(learning_rate=float(data.lr))
 
@@ -401,7 +406,8 @@ def fit(data: Dataset,
                                 data.testBatchSize,
                                 test_steps,
                                 file_writer_test,
-                                w_file_writer_test)
+                                w_file_writer_test,
+                                std_file_writer_test)
 
     if mVerbose:
         callbacks = [test_metrics, test_tables]
@@ -411,4 +417,25 @@ def fit(data: Dataset,
     accNetwork.load_weights(filepath)
     accNetwork.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    return filepath
+    if scores:
+        y_, y, lengths, transition = data.yToSequence(Model=accNetwork, get_transition=False, accTransfer=True)
+
+        accuracy = accuracy_score(y, y_)
+        f1 = f1_score(y, y_, average='macro')
+
+        modes = ['Still', 'Walk', 'Run', 'Bike', 'Car', 'Bus', 'Train', 'Subway']
+        cm = confusion_matrix(y, y_)
+        cm_df = pd.DataFrame(cm, index=['{:}'.format(x) for x in modes],
+                             columns=['{:}'.format(x) for x in modes])
+        cm_df = cm_df.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+        print('accuracy: {}'.format(accuracy))
+        print('f1 score: {}'.format(f1))
+        print()
+        print('confusion matrix')
+        print(cm_df)
+
+    else:
+        accuracy, f1, cm_df = 1., 1., 1.
+
+    return filepath, accuracy, f1, cm_df

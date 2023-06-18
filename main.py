@@ -1,3 +1,4 @@
+import copy
 import pprint
 import time
 from dataset import Dataset
@@ -13,6 +14,7 @@ savePath = os.path.join("saves", "save-" + time.strftime("%Y%m%d-%H%M%S"))
 terminalFile = os.path.join(savePath, "terminal.txt")
 
 scores = pd.DataFrame()
+cm = [[] for _ in range(3)]
 
 warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -57,7 +59,7 @@ def config_save(paramsFile):
         yaml.dump(parameters, fb)
 
 
-def scores_save(scoresFile, statsFile):
+def scores_save(scoresFile, statsFile, cmFolder):
     scores.to_csv(scoresFile, index=False)
     stats = pd.DataFrame()
 
@@ -84,6 +86,39 @@ def scores_save(scoresFile, statsFile):
 
     stats.to_csv(statsFile, index=False)
 
+    sumCm = pd.DataFrame()
+    nUsers = 0
+    for i, cmUser in enumerate(cm):
+        if len(cmUser):
+            nUsers += 1
+
+        sumCmUser = pd.DataFrame()
+        for j, df in enumerate(cmUser):
+            cmFile = os.path.join(cmFolder, 'confusion_{}_{}.csv'.format(i, j))
+            df.to_csv(cmFile, index=False)
+
+            if j == 0:
+                sumCmUser = copy.deepcopy(df)
+            else:
+                sumCmUser += df
+
+        # print(sumCmUser)
+        # print(len(cmUser))
+        # print(sumCmUser / len(cmUser))
+        meanCmUser = sumCmUser / len(cmUser)
+        # print(meanCmUser)
+        cmFile = os.path.join(cmFolder, 'confusion_{}.csv'.format(i))
+        meanCmUser.to_csv(cmFile, index=False)
+
+        if i == 0:
+            sumCm = copy.deepcopy(meanCmUser)
+        else:
+            sumCm += meanCmUser
+
+    meanCm = sumCm / nUsers
+    cmFile = os.path.join(cmFolder, 'confusion.csv')
+    meanCm.to_csv(cmFile, index=False)
+
 
 def execute(repeat=10,
             evaluation=False,
@@ -92,8 +127,13 @@ def execute(repeat=10,
             logger=False,
             postprocessing=False,
             mVerbose=False,
-            hparams=None):
+            hparams=None,
+            accScores=False,
+            gpsScores=False):
     global scores
+    global cm
+    scores = pd.DataFrame()
+    cm = [[] for _ in range(3)]
 
     if logger:
         sys.stdout = Logger()
@@ -119,27 +159,60 @@ def execute(repeat=10,
                     print()
 
                 if evaluation:
-                    acc, f1, postAcc, postF1 = evaluate(data=data,
-                                                        verbose=data.verbose,
-                                                        postprocessing=postprocessing)
+                    acc, f1, postAcc, postF1, cmT, accA, f1A, cmA, accG, f1G = evaluate(data=data,
+                                                                                        verbose=data.verbose,
+                                                                                        postprocessing=postprocessing)
 
                 else:
-                    acc, f1, postAcc, postF1 = TMD_MIL(data=data,
-                                                       summary=True,
-                                                       verbose=data.verbose,
-                                                       postprocessing=postprocessing,
-                                                       mVerbose=mVerbose)
+                    acc, f1, postAcc, postF1, cmT, accA, f1A, cmA, accG, f1G = TMD_MIL(data=data,
+                                                                                       summary=True,
+                                                                                       verbose=data.verbose,
+                                                                                       postprocessing=postprocessing,
+                                                                                       mVerbose=mVerbose,
+                                                                                       accScores=accScores,
+                                                                                       gpsScores=gpsScores)
 
                 if postprocessing:
-                    theseScores = {'Test User': str(test_user),
-                                   'Accuracy': acc,
-                                   'F1-Score': f1,
-                                   'post-Accuracy': postAcc,
-                                   'post-F1-Score': postF1}
+                    if accScores:
+                        theseScores = {'Test User': str(test_user),
+                                       'AccuracyAcc': accA,
+                                       'f1Acc': f1A}
+
+                        cm[test_user - 1].append(cmA)
+
+                    elif gpsScores:
+                        theseScores = {'Test User': str(test_user),
+                                       'AccuracyGPS': accG,
+                                       'f1GPS': f1G}
+
+                    else:
+                        theseScores = {'Test User': str(test_user),
+                                       'Accuracy': acc,
+                                       'F1-Score': f1,
+                                       'post-Accuracy': postAcc,
+                                       'post-F1-Score': postF1}
+
+                        cm[test_user - 1].append(cmT)
+
                 else:
-                    theseScores = {'Test User': str(test_user),
-                                   'Accuracy': acc,
-                                   'F1-Score': f1}
+                    if accScores:
+                        theseScores = {'Test User': str(test_user),
+                                       'AccuracyAcc': accA,
+                                       'f1Acc': f1A}
+
+                        cm[test_user - 1].append(cmA)
+
+                    elif gpsScores:
+                        theseScores = {'Test User': str(test_user),
+                                       'AccuracyGPS': accA,
+                                       'f1GPS': f1A}
+
+                    else:
+                        theseScores = {'Test User': str(test_user),
+                                       'Accuracy': acc,
+                                       'F1-Score': f1}
+
+                        cm[test_user - 1].append(cmT)
 
                 scores = scores.append(theseScores, ignore_index=True)
 
@@ -192,6 +265,13 @@ def save(hparams=None):
         except OSError as e:
             print("Error: %s - %s." % (e.filename, e.strerror))
 
+        try:
+            path = savePath
+            cmFolder = os.path.join(path, "confusion")
+            os.makedirs(cmFolder)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
+
     else:
         try:
             path = os.path.join(savePath, hparams)
@@ -199,44 +279,576 @@ def save(hparams=None):
         except OSError as e:
             print("Error: %s - %s." % (e.filename, e.strerror))
 
+        try:
+            cmFolder = os.path.join(path, "confusion")
+            os.makedirs(cmFolder)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
+
     scoresFile = os.path.join(path, "scores.csv")
     statsFile = os.path.join(path, "stats.csv")
     paramsFile = os.path.join(path, "parameters.yaml")
+    cmFolder = os.path.join(path, "confusion")
 
-    scores_save(scoresFile, statsFile)
+    scores_save(scoresFile, statsFile, cmFolder)
     config_save(paramsFile)
 
 
-def HpExecute(repeat=10,
-              all_users=True,
-              postprocessing=False,
-              regenerate=True,
-              mVerbose=False):
+def AccelerationExperiments(repeat=3,
+                            all_users=True,
+                            postprocessing=False,
+                            regenerate=True,
+                            mVerbose=False,
+                            accScores=True):
+    global scores
+    global cm
+
+    samplingRates = [0.025]
+    totalD = 60
+    for samplingRate in samplingRates:
+        scores = pd.DataFrame()
+        duration = int(totalD / samplingRate)
+        config_edit('data_args', 'accSamplingRate', samplingRate)
+        config_edit('data_args', 'accDuration', duration)
+        config_edit('train_args', 'accDuration', duration)
+        config_edit('data_args', 'accBagStride', duration)
+        config_edit('train_args', 'accBagStride', duration)
+        config_edit('data_args', 'accStride', duration)
+        hparams = 'samplingRate-' + str(samplingRate)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose,
+                accScores=accScores)
+
+    samplingRate = 0.1
+    totalD = 60
+    duration = int(totalD / samplingRate)
+    config_edit('data_args', 'accSamplingRate', samplingRate)
+    config_edit('data_args', 'accDuration', duration)
+    config_edit('train_args', 'accDuration', duration)
+    config_edit('data_args', 'accBagStride', duration)
+    config_edit('train_args', 'accBagStride', duration)
+    config_edit('data_args', 'accStride', duration)
+
+    acc_signalss = [['Acc_norm', 'Acc_y', 'Acc_x', 'Acc_z', 'Jerk']]
+
+    for acc_signals in acc_signalss:
+        scores = pd.DataFrame()
+        config_edit('train_args', 'acc_signals', acc_signals)
+        hparams = 'acc_signals-' + str(acc_signals)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose,
+                accScores=accScores)
+        regenerate = False
+
+    acc_signals = ['Acc_norm', 'Jerk']
+    config_edit('train_args', 'acc_signals', acc_signals)
+    #
+    # freq_interpolations = ['linear', 'log']
+    # for freq_interpolation in freq_interpolations:
+    #     scores = pd.DataFrame()
+    #     config_edit('train_args', 'freq_interpolation', freq_interpolation)
+    #     hparams = 'freq_interpolation-' + str(freq_interpolation)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+    #
+    # freq_interpolation = 'log'
+    # config_edit('train_args', 'freq_interpolation', freq_interpolation)
+    #
+    # log_powers = [False, True]
+    # for log_power in log_powers:
+    #     scores = pd.DataFrame()
+    #     config_edit('train_args', 'log_power', log_power)
+    #     hparams = 'log_power-' + str(log_power)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+    #
+    # log_power = True
+    # config_edit('train_args', 'log_power', log_power)
+    #
+    # specto_augments = [[], ['frequencyMask', 'timeMask']]
+    # for specto_augment in specto_augments:
+    #     scores = pd.DataFrame()
+    #     config_edit('train_args', 'specto_augment', specto_augment)
+    #     hparams = 'specto_augment-' + str(specto_augment)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+    #
+    # specto_augment = ['frequencyMask', 'timeMask']
+    # config_edit('train_args', 'specto_augment', specto_augment)
+    #
+    # specto_overlaps = [8.5, 9, 9.5, 9.9]
+    # for specto_overlap in specto_overlaps:
+    #     scores = pd.DataFrame()
+    #     config_edit('train_args', 'specto_overlap', specto_overlap)
+    #     hparams = 'specto_overlap-' + str(specto_overlap)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+
+
+def AccMILExperiments(repeat=3,
+                      all_users=True,
+                      postprocessing=False,
+                      regenerate=True,
+                      mVerbose=False,
+                      accScores=True):
+    global scores
+    global cm
+
+    # N = [1, 2, 3, 4, 5, 6, 7]
+    # for n in N:
+    #     duration = n * 600
+    #     scores = pd.DataFrame()
+    #     config_edit('data_args', 'accDuration', duration)
+    #     config_edit('train_args', 'accDuration', duration)
+    #     config_edit('data_args', 'accBagStride', duration)
+    #     config_edit('train_args', 'accBagStride', duration)
+    #     hparams = 'duration-' + str(duration)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+
+    # config_edit('train_args', 'separate_MIL', True)
+    # accBagSizes = [7]
+    # specto_overlaps = [9]
+    # bagDuration = 1800
+    # for accBagSize, specto_overlap in zip(accBagSizes, specto_overlaps):
+    #     scores = pd.DataFrame()
+    #     duration = int(bagDuration / accBagSize)
+    #     config_edit('data_args', 'accDuration', duration)
+    #     config_edit('train_args', 'accDuration', duration)
+    #     config_edit('data_args', 'accBagStride', duration)
+    #     config_edit('train_args', 'accBagStride', duration)
+    #     config_edit('data_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'specto_overlap', specto_overlap)
+    #
+    #     hparams = 'BagDuration-' + 'accBagSize-' + str(accBagSize)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+
+    # duration = 600
+    # config_edit('data_args', 'accDuration', duration)
+    # config_edit('train_args', 'accDuration', duration)
+    # config_edit('data_args', 'accBagStride', duration)
+    # config_edit('train_args', 'accBagStride', duration)
+    # config_edit('train_args', 'separate_MIL', True)
+    #
+    # accBagSizes = [1]
+    # for accBagSize in accBagSizes:
+    #     scores = pd.DataFrame()
+    #     config_edit('data_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'accBagSize', accBagSize)
+    #     hparams = 'instanceDuration-' + 'accBagSize-' + str(accBagSize)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+
+    config_edit('train_args', 'separate_MIL', True)
+    config_edit('train_args', 'train_bag_positions', 'random')
+    config_edit('train_args', 'test_bag_positions', 'random')
+    # config_edit('train_args', 'fusion', 'MIL')
+    #
+    # config_edit('train_args', 'epochs', 160)
+    # config_edit('train_args', 'oversampling', False)
+
+    config_edit('train_args', 'transfer_learning_acc', 'train')
+    config_edit('train_args', 'transfer_learning_loc', 'none')
+
+    regenerate = False
+    accBagSizes = [3]
+    bagDuration = 1800
+    for accBagSize in accBagSizes:
+        scores = pd.DataFrame()
+        duration = int(bagDuration / accBagSize)
+        config_edit('data_args', 'accDuration', duration)
+        config_edit('train_args', 'accDuration', duration)
+        config_edit('data_args', 'accBagStride', duration)
+        config_edit('train_args', 'accBagStride', duration)
+        config_edit('data_args', 'accBagSize', accBagSize)
+        config_edit('train_args', 'accBagSize', accBagSize)
+
+        hparams = 'ACC-MIL' + 'accBagSize-' + str(accBagSize)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose,
+                accScores=accScores)
+
+
+def GPSExperiments(repeat=3,
+                   all_users=True,
+                   postprocessing=False,
+                   regenerate=True,
+                   mVerbose=False,
+                   accScores=False,
+                   gpsScores=True):
     global scores
 
-    motorized_s = [False]
-    positions = ['Hand', 'Torso', 'Bag', 'Hips']
-    for motorized in motorized_s:
-        for position in positions:
-            scores = pd.DataFrame()
-            config_edit('train_args', 'motorized', motorized)
-            config_edit('train_args', 'test_position', position)
-            hparams = 'motorized-' + str(motorized) + '-test_position-' + str(position)
-            execute(repeat=repeat,
-                    all_users=all_users,
-                    postprocessing=postprocessing,
-                    regenerate=regenerate,
-                    hparams=hparams,
-                    mVerbose=mVerbose)
+    # gpsSamplingRates = [10, 20, 30, 40, 50, 60]
+    # samplingThresholds = [2, 4, 6, 8, 10, 12]
+    # interpolateThresholds = [18, 9, 6, 5, 4, 3]
+
+    # gpsSamplingRates = [20, 30, 40, 50, 60]
+    # samplingThresholds = [4, 6, 8, 10, 12]
+    # interpolateThresholds = [9, 6, 5, 4, 3]
+    #
+    # for gpsSamplingRate, samplingThreshold, interpolateThreshold in zip(gpsSamplingRates, samplingThresholds,
+    #                                                                     interpolateThresholds):
+    #
+    #     duration = 720
+    #     locDuration = int(duration / gpsSamplingRate)
+    #     scores = pd.DataFrame()
+    #     config_edit('data_args', 'gpsSamplingRate', gpsSamplingRate)
+    #     config_edit('data_args', 'samplingThreshold', samplingThreshold)
+    #     config_edit('data_args', 'interpolateThreshold', interpolateThreshold)
+    #     config_edit('data_args', 'locDuration', locDuration)
+    #
+    #     hparams = 'gpsSamplingRate-' + str(gpsSamplingRate)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores,
+    #             gpsScores=gpsScores)
+
+    # gpsSamplingRate = 60
+    # samplingThreshold = 10
+    # interpolateThreshold = 3
+    # locDuration = 12
+    #
+    # config_edit('data_args', 'gpsSamplingRate', gpsSamplingRate)
+    # config_edit('data_args', 'samplingThreshold', samplingThreshold)
+    # config_edit('data_args', 'interpolateThreshold', interpolateThreshold)
+    # config_edit('data_args', 'locDuration', locDuration)
+    #
+    # time_featuress = [['Velocity'], ['Velocity', 'Acceleration'], ['Velocity', 'Acceleration', 'BearingRate']]
+    # for time_features in time_featuress:
+    #     scores = pd.DataFrame()
+    #     config_edit('train_args', 'time_features', time_features)
+    #     hparams = 'time_features-' + str(time_features)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores,
+    #             gpsScores=gpsScores)
+    #
+    #     regenerate = False
+
+    time_features = ['Velocity', 'Acceleration']
+    config_edit('train_args', 'time_features', time_features)
+
+    statistical_featuress = [['TotalMovability'], ['Mean', 'Var'], ['TotalMovability', 'Mean', 'Var']]
+    for statistical_features in statistical_featuress:
+        scores = pd.DataFrame()
+        config_edit('train_args', 'statistical_features', statistical_features)
+        hparams = 'statistical_features-' + str(statistical_features)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose,
+                accScores=accScores,
+                gpsScores=gpsScores)
+
+    statistical_features = ['TotalMovability', 'Mean', 'Var']
+    config_edit('train_args', 'statistical_features', statistical_features)
+
+    gps_augmentations = [False, True]
+    for gps_augmentation in gps_augmentations:
+        scores = pd.DataFrame()
+        config_edit('train_args', 'gps_augmentation', gps_augmentation)
+        hparams = 'gps_augmentation-' + str(gps_augmentation)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose,
+                accScores=accScores,
+                gpsScores=gpsScores)
+
+
+def HpExecute2(repeat=10,
+               all_users=True,
+               postprocessing=False,
+               regenerate=True,
+               mVerbose=False):
+    global scores
+
+    headss = [1, 2, 3, 4]
+    for heads in headss:
+        config_edit('train_args', 'heads', heads)
+        hparams = 'heads-' + str(heads)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose)
+
+
+def MM_MILExperiments(repeat=3,
+                      all_users=True,
+                      postprocessing=False,
+                      regenerate=False,
+                      mVerbose=False,
+                      accScores=False):
+    global scores
+    global cm
+
+    # config_edit('train_args', 'separate_MIL', False)
+    # config_edit('train_args', 'train_bag_positions', 'same')
+    # config_edit('train_args', 'test_bag_positions', 'same')
+    # config_edit('train_args', 'transfer_learning_acc', 'none')
+    # config_edit('train_args', 'transfer_learning_loc', 'none')
+    # config_edit('train_args', 'epochs', 160)
+    # config_edit('train_args', 'oversampling', True)
+    # config_edit('train_args', 'fusion', 'MIL')
+
+    # regenerate = True
+    # accBagSizes = [3]
+    # bagDuration = 1800
+    # for accBagSize in accBagSizes:
+    #     scores = pd.DataFrame()
+    #     duration = int(bagDuration / accBagSize)
+    #     config_edit('data_args', 'accDuration', duration)
+    #     config_edit('train_args', 'accDuration', duration)
+    #     config_edit('data_args', 'accBagStride', duration)
+    #     config_edit('train_args', 'accBagStride', duration)
+    #     config_edit('data_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'accBagSize', accBagSize)
+    #
+    #     hparams = 'MM-MIL-' + 'accBagSize-' + str(accBagSize)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+    #
+    # regenerate = False
+    # config_edit('train_args', 'fusion', 'concat')
+    # config_edit('train_args', 'separate_MIL', True)
+    # accBagSizes = [3]
+    # bagDuration = 1800
+    # for accBagSize in accBagSizes:
+    #     scores = pd.DataFrame()
+    #     duration = int(bagDuration / accBagSize)
+    #     config_edit('data_args', 'accDuration', duration)
+    #     config_edit('train_args', 'accDuration', duration)
+    #     config_edit('data_args', 'accBagStride', duration)
+    #     config_edit('train_args', 'accBagStride', duration)
+    #     config_edit('data_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'accBagSize', accBagSize)
+    #
+    #     hparams = 'ACC-MIL-MM-CONCAT-' + 'accBagSize-' + str(accBagSize)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+
+    config_edit('train_args', 'separate_MIL', False)
+    config_edit('train_args', 'train_bag_positions', 'same')
+    config_edit('train_args', 'test_bag_positions', 'same')
+    config_edit('train_args', 'fusion', 'MIL')
+
+    config_edit('train_args', 'epochs', 160)
+    config_edit('train_args', 'oversampling', False)
+
+    config_edit('train_args', 'transfer_learning_acc', 'train')
+    config_edit('train_args', 'transfer_learning_loc', 'none')
+
+    regenerate = False
+    accBagSizes = [3]
+    bagDuration = 1800
+    for accBagSize in accBagSizes:
+        scores = pd.DataFrame()
+        duration = int(bagDuration / accBagSize)
+        config_edit('data_args', 'accDuration', duration)
+        config_edit('train_args', 'accDuration', duration)
+        config_edit('data_args', 'accBagStride', duration)
+        config_edit('train_args', 'accBagStride', duration)
+        config_edit('data_args', 'accBagSize', accBagSize)
+        config_edit('train_args', 'accBagSize', accBagSize)
+
+        hparams = 'TRANSFER-ACC-MM-MIL' + 'accBagSize-' + str(accBagSize)
+        execute(repeat=repeat,
+                all_users=all_users,
+                postprocessing=postprocessing,
+                regenerate=regenerate,
+                hparams=hparams,
+                mVerbose=mVerbose,
+                accScores=accScores)
+    #
+    # regenerate = False
+    # config_edit('train_args', 'fusion', 'concat')
+    # config_edit('train_args', 'separate_MIL', True)
+    # accBagSizes = [3]
+    # bagDuration = 1800
+    # for accBagSize in accBagSizes:
+    #     scores = pd.DataFrame()
+    #     duration = int(bagDuration / accBagSize)
+    #     config_edit('data_args', 'accDuration', duration)
+    #     config_edit('train_args', 'accDuration', duration)
+    #     config_edit('data_args', 'accBagStride', duration)
+    #     config_edit('train_args', 'accBagStride', duration)
+    #     config_edit('data_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'accBagSize', accBagSize)
+    #
+    #     hparams = 'TRANFER-ACC-MIL-MM-CONCAT-' + 'accBagSize-' + str(accBagSize)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+    #
+    # config_edit('train_args', 'separate_MIL', False)
+    # config_edit('train_args', 'train_bag_positions', 'same')
+    # config_edit('train_args', 'test_bag_positions', 'same')
+    # config_edit('train_args', 'transfer_learning_acc', 'none')
+    # config_edit('train_args', 'transfer_learning_loc', 'none')
+    # config_edit('train_args', 'epochs', 160)
+    # config_edit('train_args', 'oversampling', True)
+    # config_edit('train_args', 'fusion', 'MIL')
+    #
+    # regenerate = True
+    # accBagSizes = [1]
+    # bagDuration = 1800
+    # config_edit('train_args', 'fusion', 'concat')
+    #
+    # for accBagSize in accBagSizes:
+    #     scores = pd.DataFrame()
+    #     duration = int(bagDuration / accBagSize)
+    #     config_edit('data_args', 'accDuration', duration)
+    #     config_edit('train_args', 'accDuration', duration)
+    #     config_edit('data_args', 'accBagStride', duration)
+    #     config_edit('train_args', 'accBagStride', duration)
+    #     config_edit('data_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'accBagSize', accBagSize)
+    #
+    #     hparams = 'MM-CONCAT' + 'accBagSize-' + str(accBagSize)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+    #
+    # config_edit('train_args', 'separate_MIL', False)
+    # config_edit('train_args', 'train_bag_positions', 'same')
+    # config_edit('train_args', 'test_bag_positions', 'same')
+    # config_edit('train_args', 'transfer_learning_loc', 'none')
+    # config_edit('train_args', 'fusion', 'MIL')
+    #
+    # config_edit('train_args', 'epochs', 160)
+    # config_edit('train_args', 'oversampling', False)
+    # config_edit('train_args', 'transfer_learning_acc', 'train')
+    #
+    # regenerate = False
+    # accBagSizes = [1]
+    # bagDuration = 1800
+    # config_edit('train_args', 'fusion', 'concat')
+    #
+    # for accBagSize in accBagSizes:
+    #     scores = pd.DataFrame()
+    #     duration = int(bagDuration / accBagSize)
+    #     config_edit('data_args', 'accDuration', duration)
+    #     config_edit('train_args', 'accDuration', duration)
+    #     config_edit('data_args', 'accBagStride', duration)
+    #     config_edit('train_args', 'accBagStride', duration)
+    #     config_edit('data_args', 'accBagSize', accBagSize)
+    #     config_edit('train_args', 'accBagSize', accBagSize)
+    #
+    #     hparams = 'TRANFER-MM-CONCAT' + 'accBagSize-' + str(accBagSize)
+    #     execute(repeat=repeat,
+    #             all_users=all_users,
+    #             postprocessing=postprocessing,
+    #             regenerate=regenerate,
+    #             hparams=hparams,
+    #             mVerbose=mVerbose,
+    #             accScores=accScores)
+    #
 
 
 def main():
     try:
-        HpExecute(repeat=3,
-                  all_users=True,
-                  postprocessing=True,
-                  regenerate=False,
-                  mVerbose=False)
+        execute(repeat=4,
+                all_users=True,
+                postprocessing=True,
+                regenerate=False,
+                mVerbose=False,
+                accScores=False,
+                evaluation=False)
+
+        # MM_MILExperiments(repeat=4,
+        #                   all_users=True,
+        #                   postprocessing=True,
+        #                   regenerate=False,
+        #                   mVerbose=False,
+        #                   accScores=False)
+
+        # AccMILExperiments(repeat=4,
+        #                   all_users=True,
+        #                   postprocessing=False,
+        #                   regenerate=False,
+        #                   mVerbose=True,
+        #                   accScores=True)
     finally:
         save()
 
