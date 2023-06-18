@@ -3,7 +3,6 @@ import tensorflow as tf
 import keras
 import os
 import keras.backend as K
-from hmmlearn.hmm import MultinomialHMM
 from keras.layers import *
 from keras import Input
 from keras import initializers
@@ -15,13 +14,14 @@ from keras.losses import CategoricalCrossentropy
 from keras.metrics import categorical_accuracy
 import accEncoder
 import gpsEncoder
+import postprocess
 from dataset import Dataset
-from hmmParams import hmmParams
 from myMetrics import valMetrics, valTables, testMetrics, testTables
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+import numpy as np
+import pandas as pd
 
-
-def getAccEncoder(input_shapes, args, L, transfer=False, scale=1):
+def getAccEncoder(input_shapes, args, L, transfer=False):
     kernelInitializer = initializers.he_uniform()
     dimension = 128
     shape = args.train_args['acc_shape']
@@ -187,7 +187,7 @@ def getAccEncoder(input_shapes, args, L, transfer=False, scale=1):
 
     return Model(inputs=accBag,
                  outputs=accEncodings,
-                 name='AccelerationEncoder' + str(scale))
+                 name='AccelerationEncoder')
 
 
 def getGpsEncoder(input_shapes, args, L):
@@ -262,7 +262,7 @@ def getGpsEncoder(input_shapes, args, L):
                  name='gpsEncoder')
 
 
-def getMIL(args, L, D, head=1):
+def getMIL(L, D, head=1):
     kernelInitializer = initializers.glorot_uniform()
     kernelRegularizer = l2(0.01)
 
@@ -312,13 +312,17 @@ def getHead(L, head=1):
                  name='head' + str(head))
 
 
-def getClassifier(L, n_units=8):
+def getClassifier(L, n_units=8, noHeads=False):
     kernel_initializer = initializers.glorot_uniform()
-    head = Input(shape=(L // 2))
+    if noHeads:
+        head = Input(shape=(L))
+    else:
+        head = Input(shape=(L // 2))
+
     X = head
 
     finalLayer = Dense(units=n_units,
-                       activation='sigmoid',
+                       activation='softmax',
                        kernel_initializer=kernel_initializer)
 
     yPred = finalLayer(X)
@@ -328,46 +332,21 @@ def getClassifier(L, n_units=8):
                  name='Classifier')
 
 
-def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
+def build(input_shapes, args, accTransferNet=None, gpsTransferNet=None):
     n_heads = args.train_args['heads']
     useAccMIL = args.train_args['separate_MIL']
     motorized = args.train_args['motorized']
+    fusion = args.train_args['fusion']
+    finetuning = args.train_args['finetuning']
+    useLayerNorm = args.train_args['layer_norm']
+    noHeads = n_heads == 0
+
+    L = args.train_args['L']
+    D = args.train_args['D']
     n_classes = 5 if motorized else 8
-    accTransfer = True if accTransferNet else False
-    pyramid = args.train_args['pyramid']
-    accBagSize = args.train_args['accBagSize']
-    scales = accBagSize if pyramid else 1
-
-    accNetworks = [getAccEncoder(input_shapes, args, L, accTransfer, scale+1) for scale in range(scales)]
-    accMIL = getMIL(args, L, D, True)
-
-    if accTransfer:
-        for scale in range(scales):
-            accNetworks[scale].set_weights(accTransferNet.get_layer('AccelerationEncoder'+str(scale+1)).get_weights())
-            accNetworks[scale].trainable = False
-
-        if useAccMIL:
-            accMIL.set_weights(accTransferNet.get_layer('AccelerationMIL').get_weights())
-            accMIL.trainable = False
-
-    gpsTransfer = True if gpsTransferNet else False
-    gpsNetwork = getGpsEncoder(input_shapes, args, L)
-
-    if gpsTransfer:
-        gpsNetwork.set_weights(gpsTransferNet.get_layer('gpsEncoder').get_weights())
-        gpsNetwork.trainable = False
-
-    MILs = []
-    heads = []
-
-    for head in range(n_heads):
-        MILs.append(getMIL(args, L, D, head=head))
-        heads.append(getHead(L, head=head))
-
-    classifier = getClassifier(L, n_units=n_classes)
 
     accShape = input_shapes[0]
-    totalAccBagSize = list(accShape)[0]
+    accBagSize = list(accShape)[0]
     accSize = list(accShape)[1:]
 
     gpsSeriesShape = input_shapes[1]
@@ -378,100 +357,166 @@ def build(input_shapes, args, L, D, accTransferNet=None, gpsTransferNet=None):
 
     posShape = input_shapes[3]
 
-    accBag = Input(accShape)
-    gpsSeriesBag = Input(gpsSeriesShape)
-    gpsFeaturesBag = Input(gpsFeaturesShape)
-    accPos = Input(posShape, name='positional')
-    batchSize = tf.shape(accBag)[0]
-
-    concAccBags = tf.reshape(accBag, (batchSize * accBagSize, *accSize))
-    concGpsSignalsBags = tf.reshape(gpsSeriesBag, (batchSize * gpsBagSize, *gpsSeriesSize))
-    concGpsFeaturesBags = tf.reshape(gpsFeaturesBag, (batchSize * gpsBagSize, *gpsFeaturesSize))
-
-    gpsEncodings = gpsNetwork([concGpsSignalsBags, concGpsFeaturesBags])
+    accTransfer = True if accTransferNet else False
+    accNetwork = getAccEncoder(input_shapes, args, L, accTransfer)
 
     if useAccMIL:
-        accScaleBags = []
-        begin = 0
-        for scale in range(scales):
-            accScaleBags.append(tf.reshape(accBag[:, begin:begin+accBagSize-scale],
-                                           (batchSize * (accBagSize - scale), *accSize)))
+        accMIL = getMIL(L, D)
 
-        for scale in range(scales):
-            scaleEncodings = accNetworks[scale](accScaleBags[scale])
-            scaleEncodings = tf.reshape(scaleEncodings, (batchSize, accBagSize - scale, L))
+    if accTransfer:
 
-            if scale == 0:
-                accEncodings = scaleEncodings
+        accNetwork.set_weights(accTransferNet.get_layer('AccelerationEncoder').get_weights())
+        accNetwork.trainable = finetuning
 
+        if useAccMIL:
+            accMIL.set_weights(accTransferNet.get_layer('AccelerationMIL').get_weights())
+            accMIL.trainable = finetuning
+
+    gpsTransfer = True if gpsTransferNet else False
+    gpsNetwork = getGpsEncoder(input_shapes, args, L)
+
+    if gpsTransfer:
+        gpsNetwork.set_weights(gpsTransferNet.get_layer('gpsEncoder').get_weights())
+        gpsNetwork.trainable = finetuning
+
+    MILs = []
+    heads = []
+
+    if fusion == 'concat':
+        for head in range(n_heads):
+            if useAccMIL:
+                heads.append(getHead(L * (1 + gpsBagSize), head=head))
             else:
-                accEncodings = concatenate([accEncodings, scaleEncodings], axis=-2)
+                heads.append(getHead(L * (accBagSize + gpsBagSize), head=head))
 
-        accEncodings = tf.reshape(accEncodings, (batchSize * totalAccBagSize, L))
+        if useAccMIL:
+            classifier = getClassifier(L * (1 + gpsBagSize), n_units=n_classes, noHeads=noHeads)
+        else:
+            classifier = getClassifier(L * (accBagSize + gpsBagSize), n_units=n_classes, noHeads=noHeads)
 
-        accWs = accMIL(accEncodings)
-        accWs = tf.reshape(accWs, [batchSize, totalAccBagSize])
-        softmax = Softmax(name='weight_layer')
-        accWs = tf.expand_dims(softmax(accWs), -2)
-        accEncodings = tf.reshape(accEncodings, (batchSize, totalAccBagSize, L))
-        accPooling = tf.matmul(accWs, accEncodings)
-        gpsEncodings = tf.reshape(gpsEncodings, [batchSize, gpsBagSize, L])
-        Encodings = concatenate([accPooling, gpsEncodings], axis=-2)
-        Encodings = tf.reshape(Encodings, (batchSize * (1 + gpsBagSize), L))
+    elif fusion == 'MIL':
+        if n_heads == 0:
+            MILs.append(getMIL(L, D, head=0))
 
-        poolings = []
+        else:
+            for head in range(n_heads):
+                MILs.append(getMIL(L, D, head=head))
+                heads.append(getHead(L, head=head))
 
-        for i, MIL in enumerate(MILs):
-            attentionWs = MIL(Encodings)
-            attentionWs = tf.reshape(attentionWs, [batchSize, 1 + gpsBagSize])
-            softmax = Softmax(name='weight_layer_' + str(i))
-            attentionWs = tf.expand_dims(softmax(attentionWs), -2)
-            Encodings_ = tf.reshape(Encodings, [batchSize, 1 + gpsBagSize, L])
-            flatten = Flatten()
-            poolings.append(flatten(tf.matmul(attentionWs, Encodings_)))
+        classifier = getClassifier(L, n_units=n_classes, noHeads=noHeads)
 
-    else:
-        accEncodings = accNetworks[0](concAccBags)
+    accBags = Input(accShape)
+    gpsSeriesBags = Input(gpsSeriesShape)
+    gpsFeaturesBags = Input(gpsFeaturesShape)
+    accPos = Input(posShape, name='positional')
+
+    batchSize = tf.shape(accBags)[0]
+    reshapedAccBags = tf.reshape(accBags, (batchSize * accBagSize, *accSize))
+    reshapedGpsSeriesBags = tf.reshape(gpsSeriesBags, (batchSize * gpsBagSize, *gpsSeriesSize))
+    reshapedGpsFeaturesBags = tf.reshape(gpsFeaturesBags, (batchSize * gpsBagSize, *gpsFeaturesSize))
+
+    accEncodings = accNetwork(reshapedAccBags)
+    gpsEncodings = gpsNetwork([reshapedGpsSeriesBags, reshapedGpsFeaturesBags])
+
+    if not useAccMIL:
+        if useLayerNorm:
+            accLayerNorm = LayerNormalization(axis=1, center=True, scale=True)
+            gpsLayerNorm = LayerNormalization(axis=1, center=True, scale=True)
+
+            accEncodings = accLayerNorm(accEncodings)
+            gpsEncodings = gpsLayerNorm(gpsEncodings)
+
         accEncodings = tf.reshape(accEncodings, [batchSize, accBagSize, L])
         gpsEncodings = tf.reshape(gpsEncodings, [batchSize, gpsBagSize, L])
         Encodings = concatenate([accEncodings, gpsEncodings], axis=-2)
-        Encodings = tf.reshape(Encodings, (batchSize * (accBagSize + gpsBagSize), L))
 
         poolings = []
+        if fusion == 'MIL':
+            Encodings = tf.reshape(Encodings, (batchSize * (accBagSize + gpsBagSize), L))
 
-        for i, MIL in enumerate(MILs):
-            attentionWs = MIL(Encodings)
-            attentionWs = tf.reshape(attentionWs, [batchSize, accBagSize + gpsBagSize])
-            softmax = Softmax(name='weight_layer_' + str(i))
-            attentionWs = tf.expand_dims(softmax(attentionWs), -2)
-            Encodings_ = tf.reshape(Encodings, [batchSize, accBagSize + gpsBagSize, L])
-            flatten = Flatten()
-            poolings.append(flatten(tf.matmul(attentionWs, Encodings_)))
+            for i, MIL in enumerate(MILs):
+                attentionWs = MIL(Encodings)
+                attentionWs = tf.reshape(attentionWs, [batchSize, accBagSize + gpsBagSize])
+                softmax = Softmax(name='weight_layer_' + str(i))
+                attentionWs = tf.expand_dims(softmax(attentionWs), -2)
+                Encodings_ = tf.reshape(Encodings, [batchSize, accBagSize + gpsBagSize, L])
+                flatten = Flatten()
+                poolings.append(flatten(tf.matmul(attentionWs, Encodings_)))
+
+        if fusion == 'concat':
+            Encodings = tf.reshape(Encodings, (batchSize, L * (accBagSize + gpsBagSize)))
+            for i in range(n_heads):
+                poolings.append(Encodings)
+
+    else:
+        accAttentionWs = accMIL(accEncodings)
+        accAttentionWs = tf.reshape(accAttentionWs, [batchSize, accBagSize])
+        softmax = Softmax(name='acc_weight_layer')
+        accAttentionWs = tf.expand_dims(softmax(accAttentionWs), -2)
+        accEncodings = tf.reshape(accEncodings, [batchSize, accBagSize, L])
+        accPooling = tf.matmul(accAttentionWs, accEncodings)
+
+        if useLayerNorm:
+            accLayerNorm = LayerNormalization(axis=1, center=True, scale=True)
+            gpsLayerNorm = LayerNormalization(axis=1, center=True, scale=True)
+
+            accPooling = accLayerNorm(accPooling)
+            gpsEncodings = gpsLayerNorm(gpsEncodings)
+
+        gpsEncodings = tf.reshape(gpsEncodings, [batchSize, gpsBagSize, L])
+        Encodings = concatenate([accPooling, gpsEncodings], axis=-2)
+
+        poolings = []
+        if fusion == 'MIL':
+            Encodings = tf.reshape(Encodings, (batchSize * (1 + gpsBagSize), L))
+            poolings = []
+
+            for i, MIL in enumerate(MILs):
+                attentionWs = MIL(Encodings)
+                attentionWs = tf.reshape(attentionWs, [batchSize, 1 + gpsBagSize])
+                softmax = Softmax(name='weight_layer_' + str(i))
+                attentionWs = tf.expand_dims(softmax(attentionWs), -2)
+                Encodings_ = tf.reshape(Encodings, [batchSize, 1 + gpsBagSize, L])
+                flatten = Flatten()
+                poolings.append(flatten(tf.matmul(attentionWs, Encodings_)))
+
+        elif fusion == 'concat':
+            Encodings = tf.reshape(Encodings, (batchSize, L * (1 + gpsBagSize)))
+            for i in range(n_heads):
+                poolings.append(Encodings)
 
     poolings = tf.stack(poolings)
-    headOutputs = []
-    for i in range(n_heads):
-        headOutputs.append(heads[i](poolings[i]))
 
-    headOutputs = tf.transpose(tf.stack(headOutputs), perm=(1, 0, 2))
-    head_pooling = AveragePooling1D(pool_size=n_heads, strides=1)
-    flatten = Flatten()
-    head = flatten(head_pooling(headOutputs))
-    yPred = classifier(head)
+    if noHeads:
+        yPred = classifier(poolings[0])
 
-    return keras.models.Model([accBag, gpsSeriesBag, gpsFeaturesBag, accPos], yPred)
+    else:
+        headOutputs = []
+        for i in range(n_heads):
+            headOutputs.append(heads[i](poolings[i]))
+
+        headOutputs = tf.transpose(tf.stack(headOutputs), perm=(1, 0, 2))
+        head_pooling = AveragePooling1D(pool_size=n_heads, strides=1)
+        flatten = Flatten()
+        head = flatten(head_pooling(headOutputs))
+        yPred = classifier(head)
+
+    return keras.models.Model([accBags, gpsSeriesBags, gpsFeaturesBags, accPos], yPred)
 
 
 def TMD_MIL(data: Dataset,
             summary=False,
             verbose=0,
             mVerbose=False,
-            postprocessing=True):
-
-    L = 256
-    D = 128
+            postprocessing=True,
+            accScores=False,
+            gpsScores=False):
 
     data.initialize()
+
+    accG = 1.
+    f1G = 1.
+
     if data.gpsMode == 'load':
 
         data(gpsTransfer=True)
@@ -484,7 +529,7 @@ def TMD_MIL(data: Dataset,
         model_name = 'TMD_%s_model.h5' % model_type
         filepath = os.path.join(save_dir, model_name)
 
-        gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args, L)
+        gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args)
 
         optimizer = Adam(
             learning_rate=float(data.lr)
@@ -502,22 +547,35 @@ def TMD_MIL(data: Dataset,
 
     elif data.gpsMode == 'train':
 
-        filepath = gpsEncoder.fit(
-            L=L,
+        filepath, accG, f1G = gpsEncoder.fit(
             summary=summary,
             verbose=verbose,
-            mVerbose=mVerbose
+            mVerbose=mVerbose,
+            scores=gpsScores
         )
+
+        if gpsScores:
+
+            del data.acceleration
+            del data.location
+            del data.labels
+            del data
+
+            return 1., 1., 1., 1., 1., 1., 1., accG, f1G
 
         data(gpsTransfer=True)
 
-        gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args, L)
+        gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args)
 
         gpsNetwork.load_weights(filepath)
 
     else:
 
         gpsNetwork = None
+
+    accA = 1.
+    f1A = 1.
+    cmA = 1.
 
     if data.accMode == 'load':
 
@@ -531,7 +589,7 @@ def TMD_MIL(data: Dataset,
         model_name = 'TMD_%s_model.h5' % model_type
         filepath = os.path.join(save_dir, model_name)
 
-        accNetwork = accEncoder.build(data.inputShape, data.shl_args, L, D)
+        accNetwork = accEncoder.build(data.inputShape, data.shl_args)
 
         optimizer = Adam(
             learning_rate=float(data.lr)
@@ -549,17 +607,26 @@ def TMD_MIL(data: Dataset,
 
     elif data.accMode == 'train':
 
-        filepath = accEncoder.fit(
+        filepath, accA, f1A, cmA = accEncoder.fit(
             data=data,
-            L=L, D=D,
             summary=summary,
             verbose=verbose,
-            mVerbose=mVerbose
+            mVerbose=mVerbose,
+            scores=accScores
         )
+
+        if accScores:
+
+            del data.acceleration
+            del data.location
+            del data.labels
+            del data
+
+            return 1., 1., 1., 1., accA, f1A, cmA, 1., 1.
 
         data(accTransfer=True)
 
-        accNetwork = accEncoder.build(data.inputShape, data.shl_args, L, D)
+        accNetwork = accEncoder.build(data.inputShape, data.shl_args)
 
         accNetwork.load_weights(filepath)
 
@@ -608,7 +675,7 @@ def TMD_MIL(data: Dataset,
 
     loss_function = CategoricalCrossentropy()
 
-    TMDMiller = build(data.inputShape, data.shl_args, L, D, accNetwork, gpsNetwork)
+    TMDMiller = build(data.inputShape, data.shl_args, accNetwork, gpsNetwork)
 
     TMDMiller.compile(optimizer=optimizer,
                       loss=loss_function,
@@ -690,10 +757,17 @@ def TMD_MIL(data: Dataset,
 
     TMDMiller.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    y_, y, lengths, transition = data.yToSequence(Model=TMDMiller, get_transition=True)
+    train_dataset, _, _ = postprocess.get_dataset(data=data, Model=TMDMiller, train=True)
+    test_dataset, y, y_ = postprocess.get_dataset(data=data, Model=TMDMiller, train=False)
 
     accuracy = accuracy_score(y, y_)
     f1 = f1_score(y, y_, average='macro')
+
+    modes = ['Still', 'Walk', 'Run', 'Bike', 'Car', 'Bus', 'Train', 'Subway']
+    cm = confusion_matrix(y, y_)
+    cm_df = pd.DataFrame(cm, index=['{:}'.format(x) for x in modes],
+                         columns=['{:}'.format(x) for x in modes])
+    cm_df = cm_df.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 
     print('Accuracy without post-processing: {}'.format(accuracy))
     print('F1-Score without post-processing: {}'.format(f1))
@@ -702,22 +776,8 @@ def TMD_MIL(data: Dataset,
     postF1 = None
 
     if postprocessing:
-        n_classes = 5 if data.motorized else 8
+        postY_ = postprocess.fit_predict(train_dataset, test_dataset)
 
-        params = hmmParams()
-        confusion = params(data.complete, data.motorized)
-
-        discrete_model = MultinomialHMM(n_components=n_classes,
-                                        algorithm='viterbi',
-                                        n_iter=300,
-                                        init_params='')
-
-        discrete_model.n_features = n_classes
-        discrete_model.startprob_ = [1. / n_classes for _ in range(n_classes)]
-        discrete_model.transmat_ = transition
-        discrete_model.emissionprob_ = confusion
-
-        postY_ = discrete_model.predict(y_, lengths)
         postAccuracy = accuracy_score(y, postY_)
         postF1 = f1_score(y, postY_, average='macro')
 
@@ -729,5 +789,5 @@ def TMD_MIL(data: Dataset,
     del data.labels
     del data
 
-    return accuracy, f1, postAccuracy, postF1
+    return accuracy, f1, postAccuracy, postF1, cm_df, accA, f1A, cmA, accG, f1G
 

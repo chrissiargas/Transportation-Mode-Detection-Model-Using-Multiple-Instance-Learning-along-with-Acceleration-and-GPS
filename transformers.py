@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import spectrogram
 from scipy.interpolate import interp2d
@@ -6,6 +5,7 @@ from augment import *
 from gpsProcessing import *
 from mySpectrogram import LogBands, my_tvs, my_tvs2
 from math import floor, ceil
+import matplotlib.pyplot as plt
 
 
 class CategoricalTransformer:
@@ -43,7 +43,6 @@ class temporalTransformer:
         self.syncing = shl_args.train_args['sync']
         self.bagPositions = shl_args.train_args['train_bag_positions']
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
-        self.pyramid = shl_args.train_args['pyramid']
 
         self.rawSignals = {
             'Acc_x': 0,
@@ -80,14 +79,12 @@ class temporalTransformer:
     def __call__(self, acceleration, is_train=True, position=None, timeInfo=False):
 
         signals = None
+        signal = None
         outputs = None
         time = None
 
         if self.preprocessing:
-            if self.pyramid:
-                signals = [{} for _ in range(self.bagSize)]
-            else:
-                signals = {}
+            signals = {}
 
         else:
             if self.transfer and not self.MIL:
@@ -100,52 +97,10 @@ class temporalTransformer:
                     [acceleration[0][i * self.stride: i * self.stride + self.length] for i in range(self.bagSize)]
                 )
 
-        if type(acceleration) == list:
-            for l, layer in enumerate(acceleration):
-                layerPos = position[:self.bagSize - l]
-                accXYZ = np.array([layer[i, :, 3 * pos: 3 * pos + 3] for i, pos in layerPos])
+        accXYZ = np.array([acceleration[i, :, 3 * pos: 3 * pos + 3] for i, pos in position])
 
-                if timeInfo:
-                    time = acceleration[:, :, -3:]
-
-                signals[l] = self.generate_signals(accXYZ, is_train)
-
-        else:
-            accXYZ = np.array([acceleration[i, :, 3 * pos: 3 * pos + 3] for i, pos in position])
-
-            if timeInfo:
-                time = acceleration[:, :, -3:]
-
-            signals = self.generate_signals(accXYZ, is_train)
-
-        if self.preprocessing:
-            return signals
-
-        else:
-            if self.bagSize:
-                n_null = self.bagSize - outputs.shape[0]
-
-                if n_null > 0:
-                    extra_nulls = np.zeros((n_null, self.length, self.channels))
-                    outputs = np.concatenate((outputs, extra_nulls),
-                                             axis=0)
-
-                if self.transfer and not self.MIL:
-                    outputs = outputs[0]
-
-                    if timeInfo:
-                        time = time[0]
-
-            if timeInfo:
-                return outputs, time
-
-            else:
-                return outputs, None
-
-    def generate_signals(self, accXYZ, is_train=True):
-
-        if self.preprocessing:
-            outputs = {}
+        if timeInfo:
+            time = acceleration[:, :, -3:]
 
         if is_train and self.augmentations:
 
@@ -202,7 +157,7 @@ class temporalTransformer:
                         signal = np.concatenate((signal, np.zeros((signal.shape[0], 1))), axis=1)
 
             if self.preprocessing:
-                outputs[thisSignal] = signal
+                signals[thisSignal] = signal
                 del signal
 
             else:
@@ -215,7 +170,29 @@ class temporalTransformer:
                         axis=2
                     )
 
-        return outputs
+        if self.preprocessing:
+            return signals
+
+        else:
+            if self.bagSize:
+                n_null = self.bagSize - outputs.shape[0]
+
+                if n_null > 0:
+                    extra_nulls = np.zeros((n_null, self.length, self.channels))
+                    outputs = np.concatenate((outputs, extra_nulls),
+                                             axis=0)
+
+                if self.transfer and not self.MIL:
+                    outputs = outputs[0]
+
+                    if timeInfo:
+                        time = time[0]
+
+            if timeInfo:
+                return outputs, time
+
+            else:
+                return outputs, None
 
 
 class spectrogramTransformer:
@@ -244,16 +221,12 @@ class spectrogramTransformer:
         self.height, self.width = self.out_size
         self.syncing = shl_args.train_args['sync']
         self.log = shl_args.train_args['freq_interpolation'] == 'log'
+        self.logPower = shl_args.train_args['log_power']
         self.mySpectro = False
         self.bagPositions = shl_args.train_args['train_bag_positions']
         self.bagSize = shl_args.train_args['accBagSize']
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
-        self.pyramid = shl_args.train_args['pyramid']
-        if self.pyramid:
-            self.totalBagSize = int(self.bagSize * (self.bagSize + 1) / 2)
-
-        else:
-            self.totalBagSize = self.bagSize
+        self.plot = False
 
         self.temp_tfrm = temporalTransformer(shl_args=shl_args,
                                              preprocessing=True)
@@ -301,7 +274,7 @@ class spectrogramTransformer:
                 if self.transfer and not self.MIL:
                     return self.height, self.width, self.channels
 
-                return self.totalBagSize * self.posPerInstance, self.height, self.width, self.channels
+                return self.bagSize * self.posPerInstance, self.height, self.width, self.channels
 
             elif self.concat2D == 'Frequency':
 
@@ -310,7 +283,7 @@ class spectrogramTransformer:
                 if self.transfer and not self.MIL:
                     return self.height, self.width, 1
 
-                return self.totalBagSize * self.posPerInstance, self.height, self.width, 1
+                return self.bagSize * self.posPerInstance, self.height, self.width, 1
 
         if self.dimension == '1D':
 
@@ -319,96 +292,36 @@ class spectrogramTransformer:
             if self.transfer and not self.MIL:
                 return self.height, self.channels
 
-            return self.totalBagSize * self.posPerInstance, self.height, self.channels
+            return self.bagSize * self.posPerInstance, self.height, self.channels
 
     def get_time_shape(self):
         if self.transfer and not self.MIL:
             return self.length, 3
 
-        return self.totalBagSize * self.posPerInstance, self.length, 3
+        return self.bagSize * self.posPerInstance, self.length, 3
 
     def __call__(self, acceleration, is_train=True, position=None, timeInfo=False):
 
         masking = None
         outputs = None
-        time = None
 
         if self.transfer and not self.MIL:
-            accBag = np.array([acceleration[0][self.pivot * self.stride: self.pivot * self.stride + self.length]])
+            acceleration = np.array([acceleration[0][self.pivot * self.stride: self.pivot * self.stride + self.length]])
             position = [position[0]]
 
         else:
-            if self.pyramid:
-                accBag = []
+            acceleration = np.array(
+                [acceleration[0][i * self.stride: i * self.stride + self.length] for i in range(self.bagSize)]
+            )
 
-                for j in range(1, self.bagSize + 1):
-                    layer = np.array(
-                        [acceleration[0][i * self.stride: i * self.stride + j * self.length]
-                         for i in range(self.bagSize - j + 1)]
-                    )
-
-                    accBag.append(layer)
-
-            else:
-                accBag = np.array([acceleration[0][i * self.stride: i * self.stride + self.length]
-                                         for i in range(self.bagSize)])
-
-        if timeInfo:
-            time = acceleration[:, :, -3:]
-
-        signals = self.temp_tfrm(accBag,
+        signals = self.temp_tfrm(acceleration,
                                  is_train=is_train,
                                  position=position)
 
-        del accBag
+        del acceleration
 
         if is_train:
             masking = Masking(self.augmentations, self.out_size)
-
-        if type(signals) == list:
-            for signalsLayer in signals:
-                spectroLayer = self.generate_spectrograms(signalsLayer, masking, is_train)
-
-                if outputs is None:
-                    outputs = spectroLayer
-                else:
-                    outputs = np.concatenate((outputs, spectroLayer), axis=0)
-
-        else:
-            outputs = self.generate_spectrograms(signals, masking, is_train)
-
-        if self.totalBagSize:
-
-            n_null = self.totalBagSize - outputs.shape[0]
-            if n_null > 0:
-                extra_nulls = None
-
-                if self.dimension == '2D':
-                    if self.concat2D == 'Depth':
-                        extra_nulls = np.zeros((n_null, self.height, self.width, self.channels))
-
-                    elif self.concat2D == 'Frequency':
-                        extra_nulls = np.zeros((n_null, self.height, self.width, 1))
-
-                if self.dimension == '1D':
-                    extra_nulls = np.zeros((n_null, self.height, self.channels))
-
-                outputs = np.concatenate((outputs, extra_nulls),
-                                         axis=0)
-
-            if self.transfer and not self.MIL:
-                outputs = outputs[0]
-                if timeInfo:
-                    time = time[0]
-
-        if timeInfo:
-            return outputs, time
-
-        else:
-            return outputs, None
-
-    def generate_spectrograms(self, signals, masking, is_train):
-        outputs = None
 
         for thisSignal in signals.keys():
 
@@ -442,7 +355,36 @@ class spectrogramTransformer:
             if is_train:
                 thisSpectrogram = masking(thisSpectrogram)
 
-            np.log(thisSpectrogram + 1e-10, dtype=np.float64, out=thisSpectrogram)
+            if self.logPower:
+                np.log(thisSpectrogram + 1e-10, dtype=np.float64, out=thisSpectrogram)
+
+            if self.plot:
+                rand = np.random.randint(0, 1000)
+                if rand == 1:
+                    f, t, spectro = spectrogram(signals[thisSignal],
+                                                fs=self.freq,
+                                                nperseg=self.nperseg,
+                                                noverlap=self.noverlap)
+
+                    interpolated = self.log_inter(spectro, f, t)
+                    augmented = masking(interpolated)
+                    dBSpectrogram = np.log(augmented + 1e-10, dtype=np.float64)
+
+                    f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2, figsize=(12, 12))
+
+                    ax1.pcolormesh(spectro[0], shading='auto')
+                    ax1.title.set_text('Original Spectrogram')
+
+                    ax2.pcolormesh(interpolated[0], shading='auto')
+                    ax2.title.set_text('Interpolated Spectrogram')
+
+                    ax3.pcolormesh(augmented[0], shading='auto')
+                    ax3.title.set_text('Augmented Spectrogram')
+
+                    ax4.pcolormesh(dBSpectrogram[0], shading='auto')
+                    ax4.title.set_text('Power Spectral Density (dB)')
+
+                    plt.show()
 
             if self.dimension == '2D':
                 if self.concat2D == 'Depth':
@@ -481,7 +423,10 @@ class spectrogramTransformer:
                                                   thisSpectrogram),
                                                  axis=2)
 
-        return outputs
+        if self.transfer and not self.MIL:
+            outputs = outputs[0]
+
+        return outputs, None
 
 
 class gpsTransformer:
@@ -504,9 +449,9 @@ class gpsTransformer:
         if not self.padLimit:
             self.padLimit = self.length
         self.syncing = shl_args.train_args['sync']
+        self.symmetric = shl_args.train_args['symmetric']
         self.finalLength = None
         self.featureSize = None
-        self.symmetric = shl_args.train_args['symmetric']
 
         self.gpsFeatures = {
             'Acc': 0,
@@ -627,7 +572,6 @@ class gpsTransformer:
 
             if timeFeature in self.gpsFeatures:
                 sequence = location[:, :, self.gpsFeatures[timeFeature]]
-
             else:
                 if timeFeature == 'Distance':
 
@@ -728,7 +672,10 @@ class gpsTransformer:
 
         if self.transfer:
             window = window[0]
-            features = features[0]
+            if features is None:
+                features = []
+            else:
+                features = features[0]
             if timeInfo:
                 time = time[0]
 

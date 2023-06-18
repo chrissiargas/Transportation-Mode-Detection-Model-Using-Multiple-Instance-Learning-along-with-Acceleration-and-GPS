@@ -5,22 +5,20 @@ import gpsEncoder
 from dataset import Dataset
 import TMD
 from myMetrics import testMetrics, testTables
-from hmmParams import hmmParams
 from keras.optimizers import Adam
 from keras.losses import CategoricalCrossentropy
 from keras.metrics import categorical_accuracy
-from hmmlearn.hmm import MultinomialHMM
 from sklearn.metrics import f1_score, accuracy_score, confusion_matrix
 import numpy as np
 import pandas as pd
+import postprocess
 
 
 def evaluate(data: Dataset, verbose=0, postprocessing=True):
-
-    L = 256
-    D = 128
-
     data.initialize()
+
+    accG = 1.
+    f1G = 1.
     if data.gpsMode in ['load', 'train']:
 
         data(gpsTransfer=True)
@@ -33,7 +31,7 @@ def evaluate(data: Dataset, verbose=0, postprocessing=True):
         model_name = 'TMD_%s_model.h5' % model_type
         filepath = os.path.join(save_dir, model_name)
 
-        gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args, L)
+        gpsNetwork = gpsEncoder.build(data.inputShape, data.shl_args)
 
         optimizer = Adam(learning_rate=data.lr)
 
@@ -51,6 +49,10 @@ def evaluate(data: Dataset, verbose=0, postprocessing=True):
 
         gpsNetwork = None
 
+    accA = 1.
+    f1A = 1.
+    cmA = 1.
+
     if data.accMode in ['load', 'train']:
 
         data(accTransfer=True)
@@ -63,9 +65,7 @@ def evaluate(data: Dataset, verbose=0, postprocessing=True):
         model_name = 'TMD_%s_model.h5' % model_type
         filepath = os.path.join(save_dir, model_name)
 
-        accNetwork = accEncoder.build(data.inputShape,
-                                      data.shl_args,
-                                      L, D)
+        accNetwork = accEncoder.build(data.inputShape, data.shl_args)
 
         optimizer = Adam(learning_rate=data.lr)
 
@@ -95,7 +95,7 @@ def evaluate(data: Dataset, verbose=0, postprocessing=True):
 
     test_steps = data.testSize // data.testBatchSize
 
-    Model = TMD.build(data.inputShape, data.shl_args, L, D, accNetwork, gpsNetwork)
+    Model = TMD.build(data.inputShape, data.shl_args, accNetwork, gpsNetwork)
 
     optimizer = Adam(learning_rate=data.lr)
 
@@ -127,36 +127,27 @@ def evaluate(data: Dataset, verbose=0, postprocessing=True):
 
     callbacks = [test_metrics, test_cm]
 
-    Model.evaluate(test, steps=test_steps, callbacks=callbacks)
+    # Model.evaluate(test, steps=test_steps, callbacks=callbacks)
 
-    y_, y, lengths, transition = data.yToSequence(Model=Model, get_transition=True)
+    train_dataset, _, _ = postprocess.get_dataset(data=data, Model=Model, train=True)
+    test_dataset, y, y_ = postprocess.get_dataset(data=data, Model=Model, train=False)
 
     accuracy = accuracy_score(y, y_)
     f1 = f1_score(y, y_, average='macro')
 
+    modes = ['Still', 'Walk', 'Run', 'Bike', 'Car', 'Bus', 'Train', 'Subway']
+    cm = confusion_matrix(y, y_)
+    cm_df = pd.DataFrame(cm, index=['{:}'.format(x) for x in modes],
+                         columns=['{:}'.format(x) for x in modes])
+    cm_df = cm_df.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
     print('Accuracy without post-processing: {}'.format(accuracy))
     print('F1-Score without post-processing: {}'.format(f1))
 
-    postAccuracy = None
-    postF1 = None
-
     if postprocessing:
-        n_classes = 5 if data.motorized else 8
 
-        params = hmmParams()
-        confusion = params(data.complete, data.motorized)
+        postY_ = postprocess.fit_predict(train_dataset, test_dataset)
 
-        discrete_model = MultinomialHMM(n_components=n_classes,
-                                        algorithm='viterbi',
-                                        n_iter=300,
-                                        init_params='')
-
-        discrete_model.n_features = n_classes
-        discrete_model.startprob_ = [1. / n_classes for _ in range(n_classes)]
-        discrete_model.transmat_ = transition
-        discrete_model.emissionprob_ = confusion
-
-        postY_ = discrete_model.predict(y_, lengths)
         postAccuracy = accuracy_score(y, postY_)
         postF1 = f1_score(y, postY_, average='macro')
 
@@ -168,4 +159,4 @@ def evaluate(data: Dataset, verbose=0, postprocessing=True):
     del data.labels
     del data
 
-    return accuracy, f1, postAccuracy, postF1
+    return accuracy, f1, postAccuracy, postF1, cm_df, accA, f1A, cmA, accG, f1G

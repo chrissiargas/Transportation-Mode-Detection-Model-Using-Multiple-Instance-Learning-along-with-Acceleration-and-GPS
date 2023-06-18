@@ -7,6 +7,8 @@ from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_
 import matplotlib.pyplot as plt
 import seaborn as sns
 from keras.callbacks import Callback
+import time
+import os
 
 
 def plot_to_image(figure):
@@ -518,12 +520,19 @@ class testTables(Callback):
         self.random_position = self.bagPositions != 'same'
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
         self.accBagSize *= self.posPerInstance
+        self.user = args.train_args['test_user']
 
         if args.data_args['dataset'] == 'CompleteUser1':
             self.pnl = ['Hips']
 
         else:
             self.pnl = ['Torso','Hips','Bag','Hand']
+
+        self.path = os.path.join("saves", "Weights-" + time.strftime("%Y%m%d-%H%M%S"))
+        try:
+            os.makedirs(self.path)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
 
     def on_test_end(self, logs=None):
         total = self.batchSize * self.steps
@@ -635,6 +644,21 @@ class testTables(Callback):
         fig.suptitle('Weight Matrix')
 
         for head in range(self.n_heads):
+            modes = test_predict[:, np.newaxis]
+            ws_acc = np.concatenate([test_predict[:, np.newaxis], weights[head][:, :-1]], axis=1)
+
+            ws_std = ws_acc.std(axis=1)[:, np.newaxis]
+            std_mode = np.concatenate([modes, ws_std],  axis=1)
+            std_df = pd.DataFrame(
+                std_mode,
+                columns=['class', 'std']
+            )
+            std_df = std_df.groupby(['class'], as_index=False).mean()
+            print(std_df)
+
+            wmStdFile = os.path.join(self.path, "WeightStd-" + str(self.user) + ".csv")
+            std_df.to_csv(wmStdFile, index=False)
+
             instances = ["Acceleration " + str(i + 1) for i in range(self.accBagSize)]
             wm_pred = np.concatenate([test_predict[:, np.newaxis], weights[head]], axis=1)
 
@@ -654,6 +678,11 @@ class testTables(Callback):
                 wm_pred_df.drop(instances, inplace=True, axis=1)
 
             wm = wm_pred_df.groupby(['class'], as_index=False).mean()
+            print(wm)
+
+            wmModFile = os.path.join(self.path, "WeightModality-" + str(self.user) + ".csv")
+            wm.to_csv(wmModFile, index=False)
+
             del wm['class']
 
             if self.n_heads == 1:
@@ -978,10 +1007,9 @@ class gpsValTables(keras.callbacks.Callback):
 
         print(" - val_f1: %f - val_precision: %f - val_recall: %f" %(val_f1,val_precision,val_recall))
 
-
         cm = confusion_matrix(val_true,val_predict)
         global CM
-        CM = cm/ cm.sum(axis=1)[:, np.newaxis]
+        CM = cm / cm.sum(axis=1)[:, np.newaxis]
 
         cm_df = pd.DataFrame(cm,
                              index = self.class_names,
@@ -1341,7 +1369,8 @@ class accTestTables(keras.callbacks.Callback):
                  batchSize,
                  steps,
                  file_writer,
-                 weights_file_writer):
+                 weights_file_writer,
+                 std_file_writer):
 
         super(accTestTables, self).__init__()
         self.test = test
@@ -1350,9 +1379,10 @@ class accTestTables(keras.callbacks.Callback):
         self.accBagSize = args.train_args['accBagSize']
         self.MIL = args.train_args['separate_MIL']
         self.bagPositions = args.train_args['test_bag_positions']
-        self.random_position = self.bagPositions != 'same'
+        self.random_position = self.bagPositions == 'random'
         self.posPerInstance = 4 if self.bagPositions == 'all' else 1
         self.accBagSize *= self.posPerInstance
+        self.user = args.train_args['test_user']
 
         self.motorized = args.train_args['motorized']
         self.n_classes = 5 if self.motorized else 8
@@ -1380,6 +1410,7 @@ class accTestTables(keras.callbacks.Callback):
 
         self.file_writer = file_writer
         self.weights_file_writer = weights_file_writer
+        self.std_file_writer = std_file_writer
 
         if args.data_args['dataset'] == 'CompleteUser1':
             self.pnl = ['Hips']
@@ -1387,24 +1418,32 @@ class accTestTables(keras.callbacks.Callback):
         else:
             self.pnl = ['Torso', 'Hips', 'Bag', 'Hand']
 
+        self.path = os.path.join("saves", "Weights-" + time.strftime("%Y%m%d-%H%M%S"))
+        try:
+            os.makedirs(self.path)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
+
     def on_test_end(self, logs={}):
         total = self.batchSize * self.steps
         step = 0
         test_predict = np.zeros((total))
         test_true = np.zeros((total))
 
-        if self.MIL and self.random_position:
+        if self.MIL:
             self.weighting = keras.models.Model(
                 inputs=self.model.input,
                 outputs=self.model.get_layer("weight_layer").output
             )
 
+            weights = np.zeros((total, self.accBagSize))
+
+        if self.random_position:
             self.positional = keras.models.Model(
                 inputs=self.model.input,
                 outputs=self.model.get_layer("positional").output
             )
 
-            weights = np.zeros((total, self.accBagSize))
             positions = np.zeros((total, self.accBagSize))
 
         for batch in self.test.take(self.steps):
@@ -1417,8 +1456,10 @@ class accTestTables(keras.callbacks.Callback):
             test_predict[step * self.batchSize: (step + 1) * self.batchSize] = np.argmax(np.asarray(pred), axis=1)
             test_true[step * self.batchSize: (step + 1) * self.batchSize] = np.argmax(test_target, axis=1)
 
-            if self.MIL and self.random_position:
+            if self.MIL:
                 weights[step * self.batchSize: (step + 1) * self.batchSize] = self.weighting(test_data)
+
+            if self.random_position:
                 positions[step * self.batchSize: (step + 1) * self.batchSize] = self.positional(test_data)
 
             step += 1
@@ -1448,6 +1489,25 @@ class accTestTables(keras.callbacks.Callback):
         with self.file_writer.as_default():
             tf.summary.image('Confusion Matrix', cm_image, step=1)
 
+        if self.MIL:
+            modes = test_predict[:, np.newaxis]
+            ws = np.concatenate([weights[:, [i]] for i in range(self.accBagSize)], axis=1)
+            ws_std = ws.std(axis=1)[:, np.newaxis]
+            std_mode = np.concatenate([modes, ws_std],  axis=1)
+            std_df = pd.DataFrame(
+                std_mode,
+                columns=['class', 'std']
+            )
+            std_df = std_df.groupby(['class'], as_index=False).mean()
+
+            with self.std_file_writer.as_default():
+                tf.summary.text('Weights Std.', pd.DataFrame.to_string(std_df), step=1)
+
+            print(std_df)
+
+            wmStdFile = os.path.join(self.path, "WeightStd-" + str(self.user) + ".csv")
+            std_df.to_csv(wmStdFile, index=False)
+
         if self.MIL and self.random_position:
 
             fig, axs = plt.subplots(ncols=1, figsize=(12, 16))
@@ -1464,9 +1524,6 @@ class accTestTables(keras.callbacks.Callback):
                     wm_pos_sum = wm_pred_df.groupby(['class', 'position'], as_index=False).sum()
                     wm_pos_sum = pd.pivot_table(wm_pos_sum, values="weight", index=["class"], columns=["position"],
                                                 fill_value=0)
-
-
-
 
                     wm_pos_count = wm_pred_df.groupby(['class', 'position']).size().to_frame(name='size').reset_index()
                     wm_pos_count = pd.pivot_table(wm_pos_count, values="size", index=["class"], columns=["position"],
@@ -1492,6 +1549,8 @@ class accTestTables(keras.callbacks.Callback):
                     axs.set_yticklabels(labels=self.class_names, rotation=45)
                     axs.set_xticklabels(labels=self.pnl)
 
+                    wmPosFile = os.path.join(self.path, "PositionWeights-" + str(self.user) + ".csv")
+                    wm_pos.to_csv(wmPosFile, index=False)
                     print(wm_pos)
 
             wm_image = plot_to_image(fig)
